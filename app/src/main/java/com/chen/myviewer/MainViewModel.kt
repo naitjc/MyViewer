@@ -35,6 +35,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val library = repository.dao.observeLibrary().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val folders = repository.dao.folders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val settings = app.settings.settings.stateIn(viewModelScope, SharingStarted.Eagerly, ReaderSettings())
+    val librarySort = app.settings.librarySort.stateIn(viewModelScope, SharingStarted.Eagerly, LibrarySort.RECENT)
     val importing = MutableStateFlow<ImportUi?>(null)
     val reader = MutableStateFlow<ReaderSession?>(null)
     val loading = MutableStateFlow<Book?>(null)
@@ -164,6 +165,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) { previous?.comic?.close() }
     }
     fun updateSettings(value: ReaderSettings) = viewModelScope.launch { app.settings.update(value) }
+    fun setLibrarySort(value: LibrarySort) = viewModelScope.launch { app.settings.setLibrarySort(value) }
     fun hide(book: Book) = viewModelScope.launch { repository.dao.shelf(book.id, false) }
     fun clearHistory() = viewModelScope.launch { repository.dao.clearHistory() }
     fun removeFolder(uri: String) = viewModelScope.launch { repository.dao.deleteFolder(uri) }

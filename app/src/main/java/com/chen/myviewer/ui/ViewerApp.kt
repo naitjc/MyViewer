@@ -53,12 +53,15 @@ fun ViewerApp(vm: MainViewModel) {
         val loading by vm.loading.collectAsStateWithLifecycle()
         val importing by vm.importing.collectAsStateWithLifecycle()
         val settings by vm.settings.collectAsStateWithLifecycle()
+        val librarySort by vm.librarySort.collectAsStateWithLifecycle()
         val error by vm.error.collectAsStateWithLifecycle()
         val failedBook by vm.failedBook.collectAsStateWithLifecycle()
         val notice by vm.notice.collectAsStateWithLifecycle()
         val snackbar = remember { SnackbarHostState() }
         val context = LocalContext.current
         var tab by rememberSaveable { mutableIntStateOf(0) }
+        var shelfFilter by rememberSaveable { mutableStateOf("全部") }
+        val shelfState = rememberLazyGridState()
         var sourceDialog by remember { mutableStateOf(false) }
         var recursive by rememberSaveable { mutableStateOf(true) }
         var managing by remember { mutableStateOf<Book?>(null) }
@@ -84,7 +87,7 @@ fun ViewerApp(vm: MainViewModel) {
                 } },
             ) { padding -> Box(Modifier.padding(padding)) {
                 when (tab) {
-                    0 -> Bookshelf(library.filter { it.book.onShelf }, vm::open, { managing = it }, { sourceDialog = true })
+                    0 -> Bookshelf(library.filter { it.book.onShelf }, librarySort, vm::setLibrarySort, shelfFilter, { shelfFilter = it }, shelfState, vm::open, { managing = it }, { sourceDialog = true })
                     1 -> History(library.filter { it.book.inHistory }, vm::open, vm::clearHistory)
                     else -> SettingsScreen(vm, settings)
                 }
@@ -122,42 +125,48 @@ private fun StatusBarAppearance(background: Color) {
 }
 
 @Composable
-private fun Bookshelf(books: List<LibraryBook>, open: (Book) -> Unit, manage: (Book) -> Unit, import: () -> Unit) {
-    var filter by rememberSaveable { mutableStateOf("全部") }
-    var sort by rememberSaveable { mutableStateOf("最近阅读") }
+private fun Bookshelf(books: List<LibraryBook>, sort: LibrarySort, onSort: (LibrarySort) -> Unit, filter: String, onFilter: (String) -> Unit, state: LazyGridState, open: (Book) -> Unit, manage: (Book) -> Unit, import: () -> Unit) {
     var sortMenu by remember { mutableStateOf(false) }
     val shown = books.filter { filter == "全部" || (filter == "小说" && it.book.kind == "TEXT") || (filter == "漫画" && it.book.kind == "COMIC") }.let {
-        when (sort) { "书名" -> it.sortedBy { row -> row.book.title }; "导入时间" -> it.sortedByDescending { row -> row.book.importedAt }; else -> it }
+        val stable = compareBy<LibraryBook> { row -> row.book.title }.thenBy { row -> row.book.id }
+        when (sort) {
+            LibrarySort.TITLE -> it.sortedWith(stable)
+            LibrarySort.IMPORTED -> it.sortedWith(compareByDescending<LibraryBook> { row -> row.book.importedAt }.then(stable))
+            LibrarySort.RECENT -> it.sortedWith(compareByDescending<LibraryBook> { row -> row.book.lastOpenedAt }.thenByDescending { row -> row.book.importedAt }.then(stable))
+        }
     }
     if (books.isEmpty()) { EmptyState("把喜欢的故事放进书架", "从手机中选择 TXT 小说或 ZIP 漫画，阅读位置会自动保存。", Icons.Outlined.AutoStories) { Button(onClick = import) { Text("导入第一本书") } }; return }
-    LazyVerticalGrid(columns = GridCells.Adaptive(96.dp), contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            val recent = books.firstOrNull { it.book.lastOpenedAt > 0 }
-            if (recent != null) Surface(onClick = { open(recent.book) }, color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    BookCover(recent.book, Modifier.width(46.dp))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("继续阅读", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); Text(recent.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium); Text(progressLabel(recent), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    Icon(Icons.Outlined.ChevronRight, null)
+    Box(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(state = state, columns = GridCells.Adaptive(96.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 40.dp, bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                val recent = books.firstOrNull { it.book.lastOpenedAt > 0 }
+                if (recent != null) Surface(onClick = { open(recent.book) }, color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        BookCover(recent.book, Modifier.width(46.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("继续阅读", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); Text(recent.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium); Text(progressLabel(recent), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        Icon(Icons.Outlined.ChevronRight, null)
+                    }
                 }
             }
-        }
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("全部", "小说", "漫画").forEach { label -> FilterChip(filter == label, { filter = label }, label = { Text(label) }) }
-                Spacer(Modifier.weight(1f)); Box {
-                    IconButton(onClick = { sortMenu = true }) { Icon(Icons.Outlined.Sort, "排序：$sort") }
-                    DropdownMenu(sortMenu, { sortMenu = false }) { listOf("最近阅读", "书名", "导入时间").forEach { label -> DropdownMenuItem(text = { Text(label) }, onClick = { sort = label; sortMenu = false }) } }
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("全部", "小说", "漫画").forEach { label -> FilterChip(filter == label, { if (filter != label) state.requestScrollToItem(0); onFilter(label) }, label = { Text(label) }) }
+                    Spacer(Modifier.weight(1f)); Box {
+                        IconButton(onClick = { sortMenu = true }) { Icon(Icons.Outlined.Sort, "排序：${sort.label}") }
+                        DropdownMenu(sortMenu, { sortMenu = false }) { LibrarySort.entries.forEach { choice -> DropdownMenuItem(text = { Text(choice.label) }, trailingIcon = { if (sort == choice) Icon(Icons.Outlined.Check, null) }, onClick = { if (sort != choice) state.requestScrollToItem(0); onSort(choice); sortMenu = false }) } }
+                    }
                 }
             }
-        }
-        items(shown, key = { it.book.id }) { row ->
-            Column(Modifier.combinedClickable(onClick = { open(row.book) }, onLongClick = { manage(row.book) })) {
-                BookCover(row.book, Modifier.fillMaxWidth())
-                Spacer(Modifier.height(9.dp)); Text(row.book.title, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(3.dp)); Text(progressLabel(row), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            items(shown, key = { it.book.id }) { row ->
+                Column(Modifier.combinedClickable(onClick = { open(row.book) }, onLongClick = { manage(row.book) })) {
+                    BookCover(row.book, Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(9.dp)); Text(row.book.title, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(3.dp)); Text(progressLabel(row), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
+            if (shown.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Text("这个分类还没有书籍。", Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        if (shown.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Text("这个分类还没有书籍。", Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        BookshelfScrollbar(state, shown.size, Modifier.align(Alignment.CenterEnd))
     }
 }
 

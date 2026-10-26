@@ -6,6 +6,9 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import com.chen.myviewer.data.ImportCandidate
+import com.chen.myviewer.data.LibrarySort
+import com.chen.myviewer.data.ReaderSettings
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import org.junit.*
@@ -21,7 +24,16 @@ import java.io.File
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AppFlowTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    @Before fun startWithEmptyLibrary() {
+        val app = ViewModelProvider(compose.activity)[MainViewModel::class.java].getApplication<ViewerApplication>()
+        runBlocking(Dispatchers.IO) {
+            app.database.clearAllTables()
+            app.settings.setLibrarySort(LibrarySort.RECENT)
+            app.settings.update(ReaderSettings())
+        }
+    }
     @Test fun launchImportReadBookmarkAndResume() {
+        waitForUi { compose.onNodeWithText("导入第一本书").isDisplayed() }
         compose.onNodeWithText("导入第一本书").assertIsDisplayed()
         capture("empty-shelf")
         compose.onNodeWithText("导入第一本书").performClick()
