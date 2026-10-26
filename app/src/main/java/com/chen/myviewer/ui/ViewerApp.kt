@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -30,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.view.WindowCompat
 import com.chen.myviewer.*
 import com.chen.myviewer.data.*
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +49,7 @@ fun ViewerApp(vm: MainViewModel) {
     MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors) {
         val library by vm.library.collectAsStateWithLifecycle()
         val reader by vm.reader.collectAsStateWithLifecycle()
+        StatusBarAppearance(if (reader?.book?.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface)
         val loading by vm.loading.collectAsStateWithLifecycle()
         val importing by vm.importing.collectAsStateWithLifecycle()
         val settings by vm.settings.collectAsStateWithLifecycle()
@@ -86,9 +90,9 @@ fun ViewerApp(vm: MainViewModel) {
                 }
             } }
         }
-        if (loading != null) {
+        loading?.let { loadingBook ->
             BackHandler { vm.closeReader() }
-            AlertDialog(onDismissRequest = { vm.closeReader() }, title = { Text("正在打开") }, text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(Modifier.size(24.dp)); Text(loading!!.title) } }, confirmButton = {}, dismissButton = { TextButton(onClick = { vm.closeReader() }) { Text("取消") } })
+            AlertDialog(onDismissRequest = { vm.closeReader() }, title = { Text("正在打开") }, text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(Modifier.size(24.dp)); Text(loadingBook.title) } }, confirmButton = {}, dismissButton = { TextButton(onClick = { vm.closeReader() }) { Text("取消") } })
         }
         if (sourceDialog) AlertDialog(onDismissRequest = { sourceDialog = false }, title = { Text("导入本地书籍") }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("支持 TXT 小说和 ZIP 漫画。", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -105,6 +109,15 @@ fun ViewerApp(vm: MainViewModel) {
         if (error != null) AlertDialog(onDismissRequest = { vm.error.value = null }, title = { Text("暂时无法打开") }, text = { Text(error!!) }, confirmButton = {
             failedBook?.let { failed -> TextButton(onClick = { vm.error.value = null; relinking = failed; relink.launch(arrayOf("*/*")) }) { Text("重新定位文件") } }
         }, dismissButton = { TextButton(onClick = { vm.error.value = null }) { Text("关闭") } })
+    }
+}
+
+@Composable
+private fun StatusBarAppearance(background: Color) {
+    val window = LocalActivity.current?.window
+    val darkIcons = background.luminance() > .5f
+    LaunchedEffect(window, darkIcons) {
+        window?.let { WindowCompat.getInsetsController(it, it.decorView).isAppearanceLightStatusBars = darkIcons }
     }
 }
 
