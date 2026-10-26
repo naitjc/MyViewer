@@ -30,8 +30,10 @@ class SettingsStore internal constructor(private val store: DataStore<Preference
     private val animation = stringPreferencesKey("animation")
     private val copy = booleanPreferencesKey("copy_on_import")
     private val sort = stringPreferencesKey("library_sort")
+    private val columns = intPreferencesKey("library_columns")
     private val preferences = store.data.catch { if (it is IOException) emit(emptyPreferences()) else throw it }
     val librarySort = preferences.map { prefs -> LibrarySort.entries.firstOrNull { it.name == prefs[sort] } ?: LibrarySort.RECENT }
+    val libraryColumns = preferences.map { (it[columns] ?: 3).coerceIn(1, 6) }
     val settings = preferences.map {
         ReaderSettings(
             (it[font] ?: 20f).coerceIn(14f, 36f), (it[spacing] ?: 1.65f).coerceIn(1.2f, 2.3f),
@@ -39,6 +41,7 @@ class SettingsStore internal constructor(private val store: DataStore<Preference
         )
     }
     suspend fun setLibrarySort(value: LibrarySort) { store.edit { it[sort] = value.name } }
+    suspend fun setLibraryColumns(value: Int) { store.edit { it[columns] = value.coerceIn(1, 6) } }
     suspend fun update(value: ReaderSettings) { store.edit {
         it[font] = value.fontSize; it[spacing] = value.lineSpacing; it[bg] = value.background
         it[light] = value.brightness; it[animation] = value.animation; it[copy] = value.copyOnImport

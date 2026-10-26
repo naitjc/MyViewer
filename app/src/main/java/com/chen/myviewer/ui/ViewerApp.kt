@@ -4,6 +4,7 @@ package com.chen.myviewer.ui
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,6 +27,12 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,12 +44,10 @@ import com.chen.myviewer.*
 import com.chen.myviewer.data.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.*
 
 private val Green = Color(0xFF315B48)
 private val LightColors = lightColorScheme(primary = Green, secondary = Color(0xFF63765C), primaryContainer = Color(0xFFDCE9DF), onPrimaryContainer = Color(0xFF173B28), secondaryContainer = Color(0xFFE0E8DA), onSecondaryContainer = Color(0xFF24362B), tertiaryContainer = Color(0xFFE7E6DB), onTertiaryContainer = Color(0xFF3E4433), background = Color(0xFFFAF9F6), surface = Color(0xFFFAF9F6), surfaceContainer = Color(0xFFEFF1E9), onSurface = Color(0xFF24332D))
-private val DarkColors = darkColorScheme(primary = Color(0xFFA8CAB2), secondaryContainer = Color(0xFF334638), onSecondaryContainer = Color(0xFFDCE9DF), tertiaryContainer = Color(0xFF414539), onTertiaryContainer = Color(0xFFE7E6DB), background = Color(0xFF171D1A), surface = Color(0xFF171D1A), surfaceContainer = Color(0xFF263229))
+private val DarkColors = darkColorScheme(primary = Color(0xFFA8CAB2), primaryContainer = Color(0xFF2B4838), onPrimaryContainer = Color(0xFFD4ECD9), secondaryContainer = Color(0xFF334638), onSecondaryContainer = Color(0xFFDCE9DF), tertiaryContainer = Color(0xFF414539), onTertiaryContainer = Color(0xFFE7E6DB), background = Color(0xFF171D1A), surface = Color(0xFF171D1A), surfaceContainer = Color(0xFF263229), onSurface = Color(0xFFDEE6DE), onSurfaceVariant = Color(0xFFB8C5B9), outlineVariant = Color(0xFF3F4B42))
 
 @Composable
 fun ViewerApp(vm: MainViewModel) {
@@ -54,14 +59,30 @@ fun ViewerApp(vm: MainViewModel) {
         val importing by vm.importing.collectAsStateWithLifecycle()
         val settings by vm.settings.collectAsStateWithLifecycle()
         val librarySort by vm.librarySort.collectAsStateWithLifecycle()
+        val libraryColumns by vm.libraryColumns.collectAsStateWithLifecycle()
         val error by vm.error.collectAsStateWithLifecycle()
         val failedBook by vm.failedBook.collectAsStateWithLifecycle()
         val notice by vm.notice.collectAsStateWithLifecycle()
         val snackbar = remember { SnackbarHostState() }
         val context = LocalContext.current
+        val focus = LocalFocusManager.current
+        val keyboard = LocalSoftwareKeyboardController.current
+        val doubleTapTimeout = LocalViewConfiguration.current.doubleTapTimeoutMillis
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var shelfFilter by rememberSaveable { mutableStateOf("全部") }
+        var shelfQuery by rememberSaveable { mutableStateOf("") }
+        var lastShelfTap by remember { mutableLongStateOf(-1L) }
         val shelfState = rememberLazyGridState()
+        val shelfConfiguration = "${librarySort.name}|$libraryColumns|$shelfFilter|$shelfQuery"
+        var appliedShelfConfiguration by rememberSaveable { mutableStateOf(shelfConfiguration) }
+        LaunchedEffect(shelfConfiguration) {
+            if (appliedShelfConfiguration != shelfConfiguration) {
+                shelfState.requestScrollToItem(0)
+                appliedShelfConfiguration = shelfConfiguration
+            }
+        }
+        val returnToTop: () -> Unit = { focus.clearFocus(); keyboard?.hide(); shelfState.requestScrollToItem(0) }
+        val openBook: (Book) -> Unit = { focus.clearFocus(); keyboard?.hide(); vm.open(it) }
         var sourceDialog by remember { mutableStateOf(false) }
         var recursive by rememberSaveable { mutableStateOf(true) }
         var managing by remember { mutableStateOf<Book?>(null) }
@@ -78,18 +99,33 @@ fun ViewerApp(vm: MainViewModel) {
             if (reader != null) key(reader!!.position.sessionId) { ReaderScreen(vm, reader!!, settings, snackbar) }
             else Scaffold(
                 snackbarHost = { SnackbarHost(snackbar) },
-                topBar = { TopAppBar(title = { Column { Text("MYVIEWER", fontSize = 10.sp, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(listOf("我的书库", "最近阅读", "设置")[tab], fontWeight = FontWeight.Medium) } }, actions = {
+                topBar = { TopAppBar(title = { Column { Text("MYVIEWER", fontSize = 10.sp, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(listOf("我的书库", "最近阅读", "偏好设置")[tab], fontWeight = FontWeight.Medium) } }, actions = {
                     if (tab == 0) IconButton(onClick = { sourceDialog = true }) { Icon(Icons.Outlined.Add, "导入书籍") }
                 }) },
                 bottomBar = { NavigationBar {
                     val icons = listOf(Icons.Outlined.AutoStories, Icons.Outlined.History, Icons.Outlined.Tune)
-                    listOf("书库", "历史", "设置").forEachIndexed { index, label -> NavigationBarItem(selected = tab == index, onClick = { tab = index }, icon = { Icon(icons[index], label) }, label = { Text(label) }) }
+                    listOf("书库", "历史", "设置").forEachIndexed { index, label -> NavigationBarItem(
+                        selected = tab == index,
+                        onClick = {
+                            focus.clearFocus(); keyboard?.hide()
+                            if (index == 0) {
+                                val now = SystemClock.uptimeMillis()
+                                if (lastShelfTap >= 0 && now - lastShelfTap <= doubleTapTimeout) returnToTop()
+                                lastShelfTap = now
+                            } else lastShelfTap = -1
+                            tab = index
+                        },
+                        modifier = if (index == 0) Modifier.semantics { customActions = listOf(CustomAccessibilityAction("回到书库顶部") { tab = 0; returnToTop(); true }) } else Modifier,
+                        icon = { Icon(icons[index], label) }, label = { Text(label) }) }
                 } },
             ) { padding -> Box(Modifier.padding(padding)) {
                 when (tab) {
-                    0 -> Bookshelf(library.filter { it.book.onShelf }, librarySort, vm::setLibrarySort, shelfFilter, { shelfFilter = it }, shelfState, vm::open, { managing = it }, { sourceDialog = true })
-                    1 -> History(library.filter { it.book.inHistory }, vm::open, vm::clearHistory)
-                    else -> SettingsScreen(vm, settings)
+                    0 -> Bookshelf(books = library.filter { it.book.onShelf }, sort = librarySort, onSort = vm::setLibrarySort,
+                        filter = shelfFilter, onFilter = { shelfFilter = it }, query = shelfQuery, onQuery = { shelfQuery = it },
+                        columns = libraryColumns, state = shelfState, onTop = returnToTop,
+                        open = openBook, manage = { managing = it }, import = { sourceDialog = true })
+                    1 -> History(library.filter { it.book.inHistory }, openBook, vm::clearHistory, { tab = 0 })
+                    else -> SettingsScreen(vm, settings, libraryColumns, vm::setLibraryColumns)
                 }
             } }
         }
@@ -125,113 +161,22 @@ private fun StatusBarAppearance(background: Color) {
 }
 
 @Composable
-private fun Bookshelf(books: List<LibraryBook>, sort: LibrarySort, onSort: (LibrarySort) -> Unit, filter: String, onFilter: (String) -> Unit, state: LazyGridState, open: (Book) -> Unit, manage: (Book) -> Unit, import: () -> Unit) {
-    var sortMenu by remember { mutableStateOf(false) }
-    val shown = books.filter { filter == "全部" || (filter == "小说" && it.book.kind == "TEXT") || (filter == "漫画" && it.book.kind == "COMIC") }.let {
-        val stable = compareBy<LibraryBook> { row -> row.book.title }.thenBy { row -> row.book.id }
-        when (sort) {
-            LibrarySort.TITLE -> it.sortedWith(stable)
-            LibrarySort.IMPORTED -> it.sortedWith(compareByDescending<LibraryBook> { row -> row.book.importedAt }.then(stable))
-            LibrarySort.RECENT -> it.sortedWith(compareByDescending<LibraryBook> { row -> row.book.lastOpenedAt }.thenByDescending { row -> row.book.importedAt }.then(stable))
-        }
-    }
-    if (books.isEmpty()) { EmptyState("把喜欢的故事放进书架", "从手机中选择 TXT 小说或 ZIP 漫画，阅读位置会自动保存。", Icons.Outlined.AutoStories) { Button(onClick = import) { Text("导入第一本书") } }; return }
-    Box(Modifier.fillMaxSize()) {
-        LazyVerticalGrid(state = state, columns = GridCells.Adaptive(96.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 40.dp, bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                val recent = books.firstOrNull { it.book.lastOpenedAt > 0 }
-                if (recent != null) Surface(onClick = { open(recent.book) }, color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        BookCover(recent.book, Modifier.width(46.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("继续阅读", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); Text(recent.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium); Text(progressLabel(recent), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        Icon(Icons.Outlined.ChevronRight, null)
-                    }
-                }
-            }
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("全部", "小说", "漫画").forEach { label -> FilterChip(filter == label, { if (filter != label) state.requestScrollToItem(0); onFilter(label) }, label = { Text(label) }) }
-                    Spacer(Modifier.weight(1f)); Box {
-                        IconButton(onClick = { sortMenu = true }) { Icon(Icons.Outlined.Sort, "排序：${sort.label}") }
-                        DropdownMenu(sortMenu, { sortMenu = false }) { LibrarySort.entries.forEach { choice -> DropdownMenuItem(text = { Text(choice.label) }, trailingIcon = { if (sort == choice) Icon(Icons.Outlined.Check, null) }, onClick = { if (sort != choice) state.requestScrollToItem(0); onSort(choice); sortMenu = false }) } }
-                    }
-                }
-            }
-            items(shown, key = { it.book.id }) { row ->
-                Column(Modifier.combinedClickable(onClick = { open(row.book) }, onLongClick = { manage(row.book) })) {
-                    BookCover(row.book, Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(9.dp)); Text(row.book.title, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(3.dp)); Text(progressLabel(row), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            if (shown.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Text("这个分类还没有书籍。", Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        BookshelfScrollbar(state, shown.size, Modifier.align(Alignment.CenterEnd))
-    }
-}
-
-@Composable
-private fun BookCover(book: Book, modifier: Modifier = Modifier) {
+internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
     val bitmap by produceState<android.graphics.Bitmap?>(null, book.coverPath) { value = withContext(Dispatchers.IO) { book.coverPath?.let { BitmapFactory.decodeFile(it) } } }
     Surface(modifier.aspectRatio(.72f), shape = RoundedCornerShape(9.dp), color = if (book.kind == "TEXT") MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), book.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        else Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Text(if (book.kind == "TEXT") "TXT" else "ZIP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(book.title.take(24), fontFamily = FontFamily.Serif, fontSize = 20.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = .15f))
+        else BoxWithConstraints(Modifier.fillMaxSize()) {
+            val compact = maxWidth < 80.dp
+            val tiny = maxWidth < 56.dp
+            Column(Modifier.fillMaxSize().padding(if (tiny) 6.dp else if (compact) 8.dp else 12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                Text(if (book.kind == "TEXT") "TXT" else "ZIP", fontSize = if (tiny) 8.sp else 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(book.title.take(24), fontFamily = FontFamily.Serif, fontSize = if (tiny) 11.sp else if (compact) 14.sp else 20.sp, maxLines = if (tiny) 3 else 4, overflow = TextOverflow.Ellipsis)
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = .15f))
+            }
         }
     }
 }
-private fun progressLabel(row: LibraryBook): String = if (row.book.lastOpenedAt == 0L) "尚未阅读" else if (row.book.kind == "COMIC") "第 ${(row.position?.imageIndex ?: 0) + 1} 页" else "已读 ${((row.position?.progress ?: 0f) * 100).toInt()}%"
-
-@Composable
-private fun History(books: List<LibraryBook>, open: (Book) -> Unit, clear: () -> Unit) {
-    var confirm by remember { mutableStateOf(false) }
-    if (books.isEmpty()) EmptyState("从读过的地方继续", "打开过的书籍会显示在这里。", Icons.Outlined.History)
-    else LazyColumn(contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)) {
-        item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("${books.size} 本最近阅读", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium); TextButton(onClick = { confirm = true }) { Text("清空历史") } } }
-        items(books, key = { it.book.id }) { row ->
-            Row(Modifier.fillMaxWidth().clickable { open(row.book) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                BookCover(row.book, Modifier.width(48.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(row.book.title, fontWeight = FontWeight.Medium); Text(progressLabel(row), style = MaterialTheme.typography.bodySmall); Text(SimpleDateFormat("MM月dd日 HH:mm", Locale.CHINA).format(Date(row.book.lastOpenedAt)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                Icon(Icons.Outlined.ChevronRight, null)
-            }; HorizontalDivider()
-        }
-    }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("清空最近阅读？") }, text = { Text("阅读进度和书签会保留。") }, confirmButton = { TextButton(onClick = { clear(); confirm = false }) { Text("清空") } }, dismissButton = { TextButton(onClick = { confirm = false }) { Text("取消") } })
-}
-
-@Composable
-private fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings) {
-    val folders by vm.folders.collectAsStateWithLifecycle()
-    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Text("小说阅读", style = MaterialTheme.typography.titleMedium) }
-        item { ReadingSettings(settings, vm::updateSettings) }
-        item { HorizontalDivider(); Spacer(Modifier.height(12.dp)); Text("文件夹来源", style = MaterialTheme.typography.titleMedium) }
-        if (folders.isEmpty()) item { Text("导入时选择文件夹后，可在这里刷新。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        items(folders, key = { it.uri }) { folder -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.FolderOpen, null); Spacer(Modifier.width(12.dp)); Text(folder.name, Modifier.weight(1f))
-            IconButton(onClick = { vm.selectedFolder(Uri.parse(folder.uri), folder.recursive) }) { Icon(Icons.Outlined.Refresh, "刷新文件夹") }
-            IconButton(onClick = { vm.removeFolder(folder.uri) }) { Icon(Icons.Outlined.Close, "移除扫描来源") }
-        } }
-        item { HorizontalDivider(); Text("MyViewer ${BuildConfig.VERSION_NAME}", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.bodySmall); Text("本地阅读 · 进度与书签自动保存在本机", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        item { OutlinedButton(onClick = { vm.clearComicCache() }) { Text("清理漫画图片缓存") } }
-    }
-}
-
-@Composable
-fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("字号  ${settings.fontSize.toInt()}"); Slider(settings.fontSize, { update(settings.copy(fontSize = it)) }, valueRange = 14f..36f, steps = 21)
-        Text("行距  ${"%.1f".format(settings.lineSpacing)}"); Slider(settings.lineSpacing, { update(settings.copy(lineSpacing = it)) }, valueRange = 1.2f..2.3f)
-        Text("阅读背景")
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) { listOf("PAPER" to "纸色", "WHITE" to "浅色", "GREEN" to "护眼", "NIGHT" to "深色").forEach { (id, label) -> FilterChip(settings.background == id, { update(settings.copy(background = id)) }, label = { Text(label) }) } }
-        Text("翻页动画")
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { listOf("SLIDE" to "平移", "CURL" to "仿真翻书").forEach { (id, label) -> FilterChip(settings.animation == id, { update(settings.copy(animation = id)) }, label = { Text(label) }) } }
-        Row(verticalAlignment = Alignment.CenterVertically) { Text("亮度跟随系统", Modifier.weight(1f)); Switch(settings.brightness < 0, { update(settings.copy(brightness = if (it) -1f else .5f)) }) }
-        if (settings.brightness >= 0) Slider(settings.brightness, { update(settings.copy(brightness = it)) }, valueRange = .03f..1f)
-    }
-}
+internal fun progressLabel(row: LibraryBook): String = if (row.book.lastOpenedAt == 0L) "尚未阅读" else if (row.book.kind == "COMIC") "第 ${(row.position?.imageIndex ?: 0) + 1} 页" else "已读 ${((row.position?.progress ?: 0f) * 100).toInt()}%"
 
 @Composable
 private fun ImportDialog(ui: ImportUi, vm: MainViewModel) {
@@ -255,8 +200,11 @@ private fun ImportDialog(ui: ImportUi, vm: MainViewModel) {
 }
 
 @Composable
-private fun EmptyState(title: String, detail: String, icon: androidx.compose.ui.graphics.vector.ImageVector, action: @Composable (() -> Unit)? = null) {
+internal fun EmptyState(title: String, detail: String, icon: androidx.compose.ui.graphics.vector.ImageVector, action: @Composable (() -> Unit)? = null) {
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.height(24.dp)); Text(title, style = MaterialTheme.typography.titleMedium); Spacer(Modifier.height(12.dp)); Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(24.dp)); action?.invoke()
+        Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.primaryContainer) { Icon(icon, null, Modifier.padding(22.dp).size(38.dp), tint = MaterialTheme.colorScheme.primary) }
+        Spacer(Modifier.height(24.dp)); Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Spacer(Modifier.height(10.dp)); Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Spacer(Modifier.height(24.dp)); action?.invoke()
     }
 }

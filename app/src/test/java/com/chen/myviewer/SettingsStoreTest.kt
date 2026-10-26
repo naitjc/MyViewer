@@ -21,17 +21,21 @@ class SettingsStoreTest {
         val file = File(context.filesDir, "sort-reopen.preferences_pb")
         withStore(file) { store ->
             store.setLibrarySort(LibrarySort.TITLE)
+            store.setLibraryColumns(4)
             store.update(ReaderSettings(fontSize = 27f, copyOnImport = true))
         }
         // Close every writer and cache before reopening the actual persisted file.
         withStore(file) { restored ->
             assertEquals(LibrarySort.TITLE, restored.librarySort.first())
+            assertEquals(4, restored.libraryColumns.first())
             assertEquals(27f, restored.settings.first().fontSize, 0f)
             assertTrue(restored.settings.first().copyOnImport)
             restored.setLibrarySort(LibrarySort.IMPORTED)
+            restored.setLibraryColumns(6)
         }
         withStore(file) { restored ->
             assertEquals(LibrarySort.IMPORTED, restored.librarySort.first())
+            assertEquals(6, restored.libraryColumns.first())
             assertEquals(27f, restored.settings.first().fontSize, 0f)
         }
     }

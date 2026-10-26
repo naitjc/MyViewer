@@ -29,6 +29,7 @@ class AppFlowTest {
         runBlocking(Dispatchers.IO) {
             app.database.clearAllTables()
             app.settings.setLibrarySort(LibrarySort.RECENT)
+            app.settings.setLibraryColumns(3)
             app.settings.update(ReaderSettings())
         }
     }
