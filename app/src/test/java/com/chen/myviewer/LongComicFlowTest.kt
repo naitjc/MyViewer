@@ -17,12 +17,34 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w393dp-h851dp-xhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class LongComicFlowTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    @Test fun switchingFromContinuousToPageModeKeepsBothTapEdgesWorking() {
+        val vm = ViewModelProvider(compose.activity)[MainViewModel::class.java]
+        val source = File(compose.activity.cacheDir, "切换模式.zip").apply { writeBytes(LongComicFlowTest::class.java.getResourceAsStream("/long-comic-48-pages.zip")!!.use { it.readBytes() }) }
+        runBlocking { vm.repository.import(listOf(ImportCandidate(Uri.fromFile(source), source.name, source.length())), false) { _, _ -> } }
+        waitForUi { compose.onAllNodesWithText("切换模式").fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodesWithText("切换模式").onFirst().performClick()
+        waitForUi { vm.reader.value?.comic?.cachedPage(0) != null }
+        waitForUi { hasNoBlankBands(frame()) }
+        compose.onRoot().performTouchInput { click(center) }
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
+        waitForUi { compose.onAllNodesWithText("切换翻页").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("切换翻页").performClick()
+        waitForUi { vm.reader.value!!.preferences.mode == "PAGE" }
+        compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .9f, centerY)) }
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
+        waitForUi { vm.reader.value!!.position.imageIndex == 1 }
+        compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .1f, centerY)) }
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
+        waitForUi { vm.reader.value!!.position.imageIndex == 0 }
+        compose.runOnIdle { vm.closeReader() }
+    }
     @Test fun preloadsLongComicAndSavesLatestPositionWithoutPerPixelPublication() {
         val vm = ViewModelProvider(compose.activity)[MainViewModel::class.java]
         val source = File(compose.activity.cacheDir, "48页长条.zip").apply { writeBytes(LongComicFlowTest::class.java.getResourceAsStream("/long-comic-48-pages.zip")!!.use { it.readBytes() }) }

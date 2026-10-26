@@ -5,8 +5,6 @@ import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.material.icons.Icons
@@ -16,14 +14,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -40,7 +34,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.File
 
 @Composable
 fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSettings, snackbar: SnackbarHostState) {
@@ -92,7 +85,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         Text(if (session.text != null) "${session.text.chapterAt(session.position.textOffset)} · ${(session.position.progress * 100).toInt()}%" else "第 ${session.position.imageIndex + 1} / ${session.comic!!.images.size} 页 · 点击跳转")
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { vm.mode(if (session.preferences.mode == "PAGE") "SCROLL" else "PAGE") }) { Text(if (session.preferences.mode == "PAGE") "切换连续" else "切换翻页") }
+                        TextButton(onClick = { if (session.comic != null) menu = false; vm.mode(if (session.preferences.mode == "PAGE") "SCROLL" else "PAGE") }) { Text(if (session.preferences.mode == "PAGE") "切换连续" else "切换翻页") }
                         if (session.text != null) {
                             IconButton(onClick = { sheet = "chapters" }) { Icon(Icons.Outlined.FormatListBulleted, "章节目录") }
                             IconButton(onClick = { sheet = "bookmarks" }) { Icon(Icons.Outlined.Bookmarks, "手动书签") }
@@ -193,25 +186,26 @@ private suspend fun prefetchComic(archive: ComicArchive, visible: List<Int>, for
 private fun ComicContent(vm: MainViewModel, session: ReaderSession, menu: () -> Unit) {
     val archive = session.comic!!
     val token = session.position.sessionId
-    var zooming by remember { mutableStateOf<Pair<Int, ComicPage>?>(null) }
-    var zoomRatio by remember { mutableFloatStateOf(0f) }
     if (session.preferences.mode == "PAGE") {
         val image by rememberComicFile(archive, session.position.imageIndex)
         LaunchedEffect(archive, session.position.imageIndex) { prefetchComic(archive, listOf(session.position.imageIndex)) }
         Box(Modifier.fillMaxSize()) {
-            if (image.page != null) AndroidView(factory = { ComicImageView(it) }, update = { view ->
+            AndroidView(factory = { ComicImageView(it) }, update = { view ->
+                view.interactive = true; view.tapToTurn = true
                 view.rtl = session.preferences.direction == "RTL"
                 view.onMenu = menu
-                view.onPage = { next -> if (vm.reader.value?.position?.sessionId == token) vm.seekComic(session.position.imageIndex + if (next) 1 else -1) }
-                view.onFocus = { ratio -> if (vm.reader.value?.position?.sessionId == token) vm.comicPosition(session.position.imageIndex, ratio) }
+                view.onPage = { next -> vm.reader.value?.takeIf { it.position.sessionId == token && it.preferences.mode == "PAGE" }?.let { vm.seekComic(it.position.imageIndex + if (next) 1 else -1) } }
+                view.onFocus = { ratio -> if (vm.reader.value?.position?.sessionId == token) vm.comicPosition(session.position.imageIndex, ratio, false) }
+                view.onGestureEnd = { if (vm.reader.value?.position?.sessionId == token) vm.flushPosition() }
                 view.onError = { vm.notice.value = it }
-                view.setPage(image.page!!)
+                image.page?.let { view.setPage(it) } ?: view.clearPage()
             }, modifier = Modifier.fillMaxSize())
-            else ComicPlaceholder(image.error, Modifier.fillMaxSize())
+            if (image.page == null) ComicPlaceholder(image.error, Modifier.fillMaxSize())
             Text("${session.position.imageIndex + 1} / ${archive.images.size}", Modifier.align(Alignment.BottomEnd).padding(16.dp), color = Color.White.copy(alpha = .65f), style = MaterialTheme.typography.labelSmall)
         }
     } else {
         val state = rememberLazyListState(initialFirstVisibleItemIndex = session.position.imageIndex)
+        val zoom = remember(archive) { ComicCanvasState() }
         val sizes = remember(archive) { mutableStateMapOf<Int, Int>() }
         val imageViews = remember(archive) { mutableMapOf<Int, ComicImageView>() }
         val viewports = remember(archive) { mutableMapOf<Int, ComicViewport>() }
@@ -229,7 +223,7 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, menu: () -> 
         LaunchedEffect(state, archive) {
             snapshotFlow {
                 val info = state.layoutInfo
-                info.visibleItemsInfo.map { ComicViewport(it.index, (-it.offset).coerceAtLeast(0), (info.viewportEndOffset - it.offset).coerceAtMost(it.size)) }
+                info.visibleItemsInfo.map { ComicViewport(it.index, (zoom.visibleTop(info.viewportEndOffset) - it.offset).toInt().coerceAtLeast(0), (zoom.visibleBottom(info.viewportEndOffset) - it.offset).toInt().coerceAtMost(it.size)) }
             }.collect { windows ->
                 viewports.clear()
                 for (window in windows) { viewports[window.index] = window; imageViews[window.index]?.updateViewport(window.top, window.bottom) }
@@ -251,34 +245,18 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, menu: () -> 
                 }
             }
         }
-        LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
-            itemsIndexed(archive.images, key = { _, it -> it.name }) { index, _ ->
-                val image by rememberComicFile(archive, index)
-                val itemModifier = Modifier.fillMaxWidth().then(if (image.size != null) Modifier.aspectRatio(image.ratio.coerceAtLeast(.005f)) else Modifier.height(300.dp)).onSizeChanged { if (image.size != null) sizes[index] = it.height }
-                if (image.page != null) {
-                    val zoom: () -> Unit = { zooming = index to image.page!!; zoomRatio = session.position.imageRatio }
-                    AndroidView(factory = { ComicImageView(it).apply { interactive = false }.also { imageViews[index] = it } },
-                        onRelease = { if (imageViews[index] === it) imageViews.remove(index) },
-                        update = { view -> view.setPage(image.page!!); viewports[index]?.let { view.updateViewport(it.top, it.bottom) } },
-                        modifier = itemModifier.pointerInput(image.page) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                do {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (event.changes.count { it.pressed } >= 2) { event.changes.forEach { it.consume() }; zoom(); break }
-                                } while (event.changes.any { it.pressed })
-                            }
-                        }.combinedClickable(onClick = menu, onDoubleClick = zoom))
-                } else ComicPlaceholder(image.error, itemModifier)
-            }
-        }
-    }
-    zooming?.let { (index, page) ->
-        val closeZoom: () -> Unit = { vm.seekComic(index, zoomRatio); zooming = null }
-        Dialog(onDismissRequest = closeZoom, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-            Box(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing)) {
-                AndroidView(factory = { ComicImageView(it) }, update = { view -> view.tapToTurn = false; view.onFocus = { zoomRatio = it }; view.onError = { vm.notice.value = it }; view.setPage(page, 2.5f) }, modifier = Modifier.fillMaxSize())
-                FilledTonalIconButton(onClick = closeZoom, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) { Icon(Icons.Outlined.Close, "结束图片放大") }
+        ComicZoomSurface(zoom, menu, overflow = { state.dispatchRawDelta(it) }) {
+            LazyColumn(state = state, userScrollEnabled = !zoom.zoomed, modifier = Modifier.fillMaxSize()) {
+                itemsIndexed(archive.images, key = { _, it -> it.name }) { index, _ ->
+                    val image by rememberComicFile(archive, index)
+                    val itemModifier = Modifier.fillMaxWidth().then(if (image.size != null) Modifier.aspectRatio(image.ratio.coerceAtLeast(.005f)) else Modifier.height(300.dp)).onSizeChanged { if (image.size != null) sizes[index] = it.height }
+                    if (image.page != null) {
+                        AndroidView(factory = { ComicImageView(it).apply { interactive = false }.also { imageViews[index] = it } },
+                            onRelease = { if (imageViews[index] === it) imageViews.remove(index) },
+                            update = { view -> view.setPage(image.page!!); view.updateDisplayScale(zoom.scale); viewports[index]?.let { view.updateViewport(it.top, it.bottom) } },
+                            modifier = itemModifier)
+                    } else ComicPlaceholder(image.error, itemModifier)
+                }
             }
         }
     }

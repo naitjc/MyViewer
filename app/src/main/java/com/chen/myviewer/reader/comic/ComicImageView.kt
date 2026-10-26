@@ -15,6 +15,7 @@ class ComicImageView internal constructor(context: Context, private val openRast
     var onMenu: () -> Unit = {}
     var onPage: (Boolean) -> Unit = {}
     var onFocus: (Float) -> Unit = {}
+    var onGestureEnd: () -> Unit = {}
     var onError: (String) -> Unit = {}
     var interactive = true
     var rtl = false
@@ -33,6 +34,9 @@ class ComicImageView internal constructor(context: Context, private val openRast
     private var panY = 0f
     private var initialZoom = 1f
     private var wasScaling = false
+    private data class Transform(val zoom: Float, val x: Float, val y: Float)
+    private var heldTransform: Transform? = null
+    private var displayScale = 1f
     private var lastError = ""
     private var loadJob: Job? = null
     private var tileJob: Job? = null
@@ -51,7 +55,8 @@ class ComicImageView internal constructor(context: Context, private val openRast
     private val touch = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent) = true
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            when (ComicTouchPolicy.tap(e.x, width, rtl, zoom > 1.01f || !tapToTurn)) {
+            if (wasScaling || heldTransform != null) return true
+            when (ComicTouchPolicy.tap(e.x, width, rtl, !tapToTurn)) {
                 ComicTapAction.PREVIOUS -> onPage(false)
                 ComicTapAction.NEXT -> onPage(true)
                 ComicTapAction.MENU -> performClick()
@@ -59,12 +64,18 @@ class ComicImageView internal constructor(context: Context, private val openRast
             return true
         }
         override fun onDoubleTap(e: MotionEvent): Boolean { zoomAt(if (zoom > 1.1f) 1f else 2.5f, e.x, e.y); return true }
+        override fun onLongPress(e: MotionEvent) {
+            if (sourceWidth <= 0) return
+            heldTransform = Transform(zoom, panX, panY)
+            parent?.requestDisallowInterceptTouchEvent(true)
+            zoomAt((zoom * 2.5f).coerceAtMost(8f), e.x, e.y)
+        }
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
             if (zoom > 1.01f) { panX -= distanceX; panY -= distanceY; clamp(); invalidate(); reportFocus(); return true }
             return false
         }
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-            if (zoom > 1.01f || wasScaling || !tapToTurn || e1 == null) return false
+            if (zoom > 1.01f || wasScaling || heldTransform != null || !tapToTurn || e1 == null) return false
             if (abs(e2.x - e1.x) > 45 * resources.displayMetrics.density && abs(velocityX) > abs(velocityY)) {
                 onPage(if (rtl) velocityX > 0 else velocityX < 0); return true
             }
@@ -74,7 +85,7 @@ class ComicImageView internal constructor(context: Context, private val openRast
     private val scale = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean { wasScaling = true; parent?.requestDisallowInterceptTouchEvent(true); return true }
         override fun onScale(detector: ScaleGestureDetector): Boolean { zoomAt((zoom * detector.scaleFactor).coerceIn(1f, 8f), detector.focusX, detector.focusY); return true }
-    })
+    }).apply { isQuickScaleEnabled = false }
 
     fun setPage(page: ComicPage, requestedZoom: Float = 1f) = setImage(page.file, requestedZoom, page)
 
@@ -83,6 +94,7 @@ class ComicImageView internal constructor(context: Context, private val openRast
             (lastError.isEmpty() || prepared == null || prepared.preview === preparedPage?.preview)) return
         generation++; val token = generation
         bound = true; file = value; initialZoom = requestedZoom
+        heldTransform = null
         loadJob?.cancel(); tileJob?.cancel(); tileJob = null
         disposeRaster(raster); raster = null
         sourceWidth = prepared?.size?.width ?: 0; sourceHeight = prepared?.size?.height ?: 0
@@ -105,6 +117,28 @@ class ComicImageView internal constructor(context: Context, private val openRast
             catch (e: Exception) { if (token == generation) { lastError = e.message ?: "图片无法显示"; onError(lastError); invalidate() } }
             finally { if (opened !== raster) disposeRaster(opened) }
         }
+    }
+
+    /** Keep the full-screen gesture target alive while the next page is still loading. */
+    fun clearPage() {
+        if (!bound && file == null) return
+        generation++; bound = false; file = null; preparedPage = null; heldTransform = null
+        loadJob?.cancel(); tileJob?.cancel(); tileJob = null
+        disposeRaster(raster); raster = null; preview = null
+        sourceWidth = 0; sourceHeight = 0; zoom = 1f; panX = 0f; panY = 0f
+        tiles.evictAll(); wantedTiles = emptyList(); failedTiles.clear(); lastError = ""
+        invalidate()
+    }
+
+    fun updateDisplayScale(value: Float) {
+        if (displayScale == value) return
+        displayScale = value.coerceAtLeast(1f); invalidate()
+    }
+
+    private fun releaseHold() {
+        val saved = heldTransform ?: return
+        heldTransform = null; zoom = saved.zoom; panX = saved.x; panY = saved.y
+        clamp(); invalidate(); reportFocus()
     }
 
     /** Lazy-list translation does not necessarily redraw an Android View's display list. */
@@ -133,12 +167,14 @@ class ComicImageView internal constructor(context: Context, private val openRast
         panX = panX.coerceIn(-maxX, maxX); panY = panY.coerceIn(-maxY, maxY)
     }
     private fun reportFocus() {
+        if (heldTransform != null) return
         val s = baseScale() * zoom
         if (sourceHeight > 0 && s > 0) onFocus((-originY(s) / s / sourceHeight).coerceIn(0f, 1f))
     }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (sourceWidth == 0 || sourceHeight == 0) {
+            if (file == null) return
             paint.color = Color.GRAY; paint.textSize = 14 * resources.displayMetrics.scaledDensity
             canvas.drawText(if (lastError.isEmpty()) "图片加载中…" else lastError.take(30), 20f, height / 2f, paint); return
         }
@@ -162,7 +198,7 @@ class ComicImageView internal constructor(context: Context, private val openRast
         )
         if (sourceVisible.isEmpty) return
         var sample = 1
-        while (sample * 2 * s < 1f) sample *= 2
+        while (sample * 2 * s * displayScale < 1f) sample *= 2
         var plan = ComicTilePlanner.plan(sourceWidth, sourceHeight, sample, sourceVisible)
         // Alpha images can require 4 bytes/pixel even with RGB_565 requested. Fit all visible
         // tiles within the real memory budget, otherwise an LRU can endlessly evict its own work.
@@ -197,8 +233,10 @@ class ComicImageView internal constructor(context: Context, private val openRast
     @android.annotation.SuppressLint("ClickableViewAccessibility") // Confirmed taps route to performClick or page actions.
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!interactive) return false
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) wasScaling = false
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) { releaseHold(); wasScaling = false }
+        if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) releaseHold()
         scale.onTouchEvent(event); touch.onTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) { releaseHold(); onGestureEnd() }
         if (zoom > 1.01f || scale.isInProgress) parent?.requestDisallowInterceptTouchEvent(true)
         return true
     }
@@ -209,7 +247,7 @@ class ComicImageView internal constructor(context: Context, private val openRast
         if (!scope.isActive) { scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate); bound = false; file?.let { setImage(it, initialZoom, preparedPage) } }
     }
     override fun onDetachedFromWindow() {
-        generation++; bound = false; scope.cancel()
+        generation++; bound = false; heldTransform = null; scope.cancel()
         disposeRaster(raster); raster = null; preview = null; tiles.evictAll()
         super.onDetachedFromWindow()
     }

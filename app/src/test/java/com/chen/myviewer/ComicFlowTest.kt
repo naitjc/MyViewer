@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.net.Uri
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import com.chen.myviewer.data.ImportCandidate
@@ -52,6 +53,27 @@ class ComicFlowTest {
         compose.onNodeWithText("切换连续").performClick()
         waitForUi { vm.reader.value!!.preferences.mode == "SCROLL" }
         frame(); capture("comic-continuous")
+        zoom(100).assertExists()
+        compose.onRoot().performTouchInput {
+            down(0, androidx.compose.ui.geometry.Offset(width * .4f, centerY))
+            down(1, androidx.compose.ui.geometry.Offset(width * .6f, centerY))
+            for (fraction in listOf(.3f, .2f, .1f)) {
+                moveTo(0, androidx.compose.ui.geometry.Offset(width * fraction, centerY))
+                moveTo(1, androidx.compose.ui.geometry.Offset(width * (1f - fraction), centerY))
+            }
+            up(1); up(0)
+        }
+        compose.onAllNodes(isDialog()).assertCountEquals(0)
+        zoom(100).assertDoesNotExist()
+        capture("comic-continuous-inline-zoom")
+        compose.onRoot().performTouchInput { doubleClick(center) }
+        zoom(100).assertExists()
+        compose.onRoot().performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(700)
+        zoom(250).assertExists()
+        compose.onRoot().performTouchInput { up() }
+        zoom(100).assertExists()
+        compose.onAllNodes(isDialog()).assertCountEquals(0)
         val book = vm.reader.value!!.book
         compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
         waitForUi { vm.reader.value == null }
@@ -61,6 +83,7 @@ class ComicFlowTest {
         assertEquals("RTL", vm.reader.value!!.preferences.direction)
         compose.runOnIdle { vm.closeReader() }
     }
+    private fun zoom(percent: Int) = compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "缩放 $percent%"))
     private fun waitForUi(condition: () -> Boolean) = compose.waitUntil(10000) { shadowOf(android.os.Looper.getMainLooper()).idle(); condition() }
     private fun frame(): Bitmap {
         lateinit var bitmap: Bitmap

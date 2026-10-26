@@ -11,8 +11,8 @@ import kotlin.math.abs
 enum class ComicTapAction { PREVIOUS, NEXT, MENU }
 
 object ComicTouchPolicy {
-    fun tap(x: Float, width: Int, rtl: Boolean, zoomed: Boolean): ComicTapAction {
-        if (width <= 0 || zoomed) return ComicTapAction.MENU
+    fun tap(x: Float, width: Int, rtl: Boolean, turningDisabled: Boolean): ComicTapAction {
+        if (width <= 0 || turningDisabled) return ComicTapAction.MENU
         val left = x < width * .3f
         val right = x > width * .7f
         if (!left && !right) return ComicTapAction.MENU

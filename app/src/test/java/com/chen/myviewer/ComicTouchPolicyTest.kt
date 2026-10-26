@@ -15,7 +15,7 @@ class ComicTouchPolicyTest {
         assertEquals(ComicTapAction.PREVIOUS, ComicTouchPolicy.tap(950f, 1000, true, false))
         assertEquals(ComicTapAction.MENU, ComicTouchPolicy.tap(500f, 1000, true, false))
     }
-    @Test fun enlargedImageDoesNotAccidentallyTurnThePage() {
+    @Test fun disablingPageTurnsKeepsAllTapsAsMenuActions() {
         assertEquals(ComicTapAction.MENU, ComicTouchPolicy.tap(50f, 1000, true, true))
         assertEquals(ComicTapAction.MENU, ComicTouchPolicy.tap(950f, 1000, false, true))
     }
