@@ -1,6 +1,7 @@
 package com.chen.myviewer
 
 import android.os.Looper
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
@@ -59,11 +60,13 @@ class LibraryPagesFlowTest {
         compose.onNodeWithText("设置").performClick()
         waitForUi { compose.onNodeWithText("每行书籍数量").isDisplayed() }
         capture("settings-redesign")
+        expandSection("小说阅读")
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("阅读预览"))
         compose.onNodeWithText("护眼").performScrollTo().performClick()
         waitForUi { vm.settings.value.background == "GREEN" }
         assertEquals(3, vm.libraryColumns.value)
         capture("settings-reading-preview")
+        expandSection("存储管理")
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("清理漫画图片缓存"))
         compose.onNodeWithText("清理漫画图片缓存").assertIsDisplayed()
         capture("settings-storage-redesign")
@@ -79,6 +82,53 @@ class LibraryPagesFlowTest {
         compose.onNodeWithText("设置").performClick()
         waitForUi { compose.onNodeWithText("每行书籍数量").isDisplayed() }
         capture("settings-redesign-dark")
+        expandSection("小说阅读")
+        compose.onNodeWithText("阅读预览").performScrollTo()
+        capture("settings-reading-expanded-dark")
+    }
+
+    @Test fun settingsGroupsToggleIndependentlyAndKeepStateAcrossNavigation() {
+        compose.onNodeWithText("设置").performClick()
+        waitForUi { compose.onNodeWithText("每行书籍数量").isDisplayed() }
+        assertSection("书架布局", true)
+        assertSection("小说阅读", false)
+        compose.onNodeWithText("阅读预览").assertDoesNotExist()
+        capture("settings-folded-default")
+        expandSection("小说阅读")
+        compose.onNodeWithText("护眼").performScrollTo().performClick()
+        waitForUi { vm.settings.value.background == "GREEN" }
+        assertSection("小说阅读", true)
+        assertSection("书架布局", true)
+        compose.onNodeWithText("阅读预览").performScrollTo()
+        capture("settings-reading-expanded")
+        section("小说阅读").performScrollTo().performClick()
+        waitForUi { compose.onAllNodesWithText("阅读预览").fetchSemanticsNodes().isEmpty() }
+        assertEquals("GREEN", vm.settings.value.background)
+        section("书架布局").performScrollTo().performClick()
+        compose.onNodeWithText("3 本").assertDoesNotExist()
+        capture("settings-all-collapsed")
+        expandSection("导入偏好")
+        compose.onNodeWithText("默认复制到应用").assertIsDisplayed()
+        expandSection("小说阅读")
+        compose.onNodeWithText("书库").performClick()
+        compose.onNodeWithText("设置").performClick()
+        assertSection("小说阅读", true)
+        assertSection("导入偏好", true)
+        assertSection("书架布局", false)
+        compose.activityRule.scenario.recreate()
+        assertSection("小说阅读", true)
+        assertSection("导入偏好", true)
+        assertEquals("GREEN", vm.settings.value.background)
+    }
+
+    private fun section(title: String) = compose.onNodeWithContentDescription("${title}分组")
+    private fun assertSection(title: String, expanded: Boolean) {
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasContentDescription("${title}分组"))
+        section(title).assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, if (expanded) "已展开" else "已收起"))
+    }
+    private fun expandSection(title: String) {
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasContentDescription("${title}分组"))
+        if (section(title).fetchSemanticsNode().config[SemanticsProperties.StateDescription] != "已展开") section(title).performClick()
     }
 
     private fun seedHistory() {

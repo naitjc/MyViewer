@@ -20,6 +20,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -48,6 +49,7 @@ import kotlinx.coroutines.withContext
 private val Green = Color(0xFF315B48)
 private val LightColors = lightColorScheme(primary = Green, secondary = Color(0xFF63765C), primaryContainer = Color(0xFFDCE9DF), onPrimaryContainer = Color(0xFF173B28), secondaryContainer = Color(0xFFE0E8DA), onSecondaryContainer = Color(0xFF24362B), tertiaryContainer = Color(0xFFE7E6DB), onTertiaryContainer = Color(0xFF3E4433), background = Color(0xFFFAF9F6), surface = Color(0xFFFAF9F6), surfaceContainer = Color(0xFFEFF1E9), onSurface = Color(0xFF24332D))
 private val DarkColors = darkColorScheme(primary = Color(0xFFA8CAB2), primaryContainer = Color(0xFF2B4838), onPrimaryContainer = Color(0xFFD4ECD9), secondaryContainer = Color(0xFF334638), onSecondaryContainer = Color(0xFFDCE9DF), tertiaryContainer = Color(0xFF414539), onTertiaryContainer = Color(0xFFE7E6DB), background = Color(0xFF171D1A), surface = Color(0xFF171D1A), surfaceContainer = Color(0xFF263229), onSurface = Color(0xFFDEE6DE), onSurfaceVariant = Color(0xFFB8C5B9), outlineVariant = Color(0xFF3F4B42))
+private val SettingsSectionSaver = listSaver<List<String>, String>(save = { it }, restore = { it.toList() })
 
 @Composable
 fun ViewerApp(vm: MainViewModel) {
@@ -71,6 +73,7 @@ fun ViewerApp(vm: MainViewModel) {
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var shelfFilter by rememberSaveable { mutableStateOf("全部") }
         var shelfQuery by rememberSaveable { mutableStateOf("") }
+        var expandedSettings by rememberSaveable(stateSaver = SettingsSectionSaver) { mutableStateOf<List<String>>(listOf("layout")) }
         var lastShelfTap by remember { mutableLongStateOf(-1L) }
         val shelfState = rememberLazyGridState()
         val shelfConfiguration = "${librarySort.name}|$libraryColumns|$shelfFilter|$shelfQuery"
@@ -125,7 +128,9 @@ fun ViewerApp(vm: MainViewModel) {
                         columns = libraryColumns, state = shelfState, onTop = returnToTop,
                         open = openBook, manage = { managing = it }, import = { sourceDialog = true })
                     1 -> History(library.filter { it.book.inHistory }, openBook, vm::clearHistory, { tab = 0 })
-                    else -> SettingsScreen(vm, settings, libraryColumns, vm::setLibraryColumns)
+                    else -> SettingsScreen(vm, settings, libraryColumns, vm::setLibraryColumns, expandedSettings) { section ->
+                        expandedSettings = if (section in expandedSettings) expandedSettings - section else expandedSettings + section
+                    }
                 }
             } }
         }
