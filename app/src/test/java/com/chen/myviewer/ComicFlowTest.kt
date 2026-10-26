@@ -35,6 +35,12 @@ class ComicFlowTest {
         assertEquals("RTL", vm.reader.value!!.preferences.direction)
         assertEquals("PAGE", vm.reader.value!!.preferences.mode)
         waitForUi { val bitmap = frame(); bitmap.getPixel(bitmap.width / 2, bitmap.height / 2) != Color.BLACK }
+        compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .15f, centerY)) }
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
+        waitForUi { vm.reader.value!!.position.imageIndex == 1 }
+        compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .85f, centerY)) }
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
+        waitForUi { vm.reader.value!!.position.imageIndex == 0 }
         capture("comic-page")
         compose.onRoot().performTouchInput { doubleClick(center) }
         waitForUi { vm.reader.value!!.position.imageRatio > 0f }

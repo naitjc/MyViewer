@@ -1,51 +1,51 @@
-# MyViewer 0.1.0 验证记录
+# MyViewer 0.1.1 验证记录
 
-更新时间：2026-10-25 21:41（北京时间）。
+更新时间：2026-10-26（北京时间）。0.1.0 的记录保留在 [docs/validation-0.1.0.md](docs/validation-0.1.0.md)。
 
 ## 安装包
 
-- 文件：`dist/MyViewer-0.1.0.apk`
-- 大小：13.23 MiB。
-- applicationId：`com.chen.myviewer`；版本 `0.1.0`，versionCode `1`。
+- 文件：`dist/MyViewer-0.1.1.apk`；大小 13,868,922 字节（13.23 MiB）。
+- applicationId：`com.chen.myviewer`；版本 `0.1.1`，versionCode `2`。
 - 最低 Android API 26；编译与目标 API 36。
-- 独立 Release 构建，应用专用签名；APK v2 / v3 签名校验通过。
-- SHA-256：`9f35251ce0c55c9dac4a045e2fa97f06b79e28d6e26d0b88310b1f1f41fdec4a`
+- Release 构建、APK v2 / v3 签名和 16 KiB ZIP 对齐检查通过。
+- 已比对 0.1.0 / 0.1.1 签名证书 SHA-256，完全一致；数据库结构未改变，支持覆盖安装。
+- APK SHA-256：`58927cedbe0d7acb211631f2f2c19a6979c595cbcd224a8ffedf11244825dbb2`。
+- 校验文件：`dist/MyViewer-0.1.1.apk.sha256`。
 
-## 已完成检查
+## 漫画修复与验证
 
-最终执行：
+- 左 / 中 / 右点击区域遵循 LTR / RTL 设置：两侧翻页，中间菜单；放大后单击不切页，双击仍可切换缩放。
+- 按滚动方向预加载前方 3 页、身后 1 页；先读图片尺寸，减少加载时的布局变化。
+- 受内存限制的整图预览铺底，固定网格的高清块逐步补齐；快速改变可见区域不再反复取消解码，已完成的块可复用。
+- 图片解绑后在后台关闭解码器；图片缓存清理也移出前台读取路径。
+- 同一页滚动时界面进度发布最多每 200 ms 一次，停止、退出与切换模式时保留最新位置；亮度仅在设置变化时应用。
+
+执行命令：
 
 ```sh
 ./scripts/build.sh :app:testDebugUnitTest :app:lintDebug --no-daemon --console=plain
 ./scripts/sign-release.sh
 ```
 
-共 22 项自动测试通过，0 失败。
+29 项自动测试通过，0 失败、0 错误、0 跳过。Lint 为 0 个错误、19 条警告，未关闭错误检查。
 
 | 测试组 | 数量 | 主要覆盖 |
 | --- | --- | --- |
-| AppFlowTest | 1 | 实际 Activity 启动、书架、小说滚动、书签、退出与位置恢复 |
-| ComicFlowTest | 1 | ZIP 打开、实际图片像素、双击缩放、RTL 翻页、连续模式与偏好恢复 |
-| DatabaseTest | 3 | 会话与序号隔离、清历史 / 隐藏书架后保留数据、Upsert 保留进度 |
-| ImportRepositoryTest | 4 | 复制后删除原文件、重复导入保留进度、ZIP 排序与元数据、失败副本清理 |
-| NaturalOrderTest | 3 | 嵌套路径和数字排序、超长数字、比较器一致性 |
-| PaginationTest | 2 | 分页完整覆盖、前后页一致、字号变化、UTF-16 代理项边界 |
-| TextGestureTest | 1 | 平移 / 仿真两种动画的完成与取消 |
-| TextParserTest | 7 | UTF-8 / GB18030 / UTF-16、章节偏移、空文件、无目录与摘录边界 |
+| ComicTouchPolicyTest | 3 | LTR / RTL 两侧点击、中心菜单与放大状态 |
+| ComicRenderingTest | 3 | 慢打开时重复绑定只开一次、慢解码和快速移动时预览像素完整、主线程解绑不等待解码 |
+| LongComicFlowTest | 1 | 48 张 600×12000 长图、双向预加载、快速滑动后的不透明图片像素、滚动发布节流与退出保存最新位置 |
+| ComicFlowTest | 1 | 实际 Activity、ZIP 图片像素、RTL 左右点击与滑动、双击缩放、模式与偏好恢复 |
+| AppFlowTest | 1 | 书架、小说滚动、书签、退出与恢复 |
+| DatabaseTest / ImportRepositoryTest | 7 | 会话与保存序号隔离、保留进度、复制与重复导入、ZIP 元数据 |
+| NaturalOrderTest / PaginationTest / TextGestureTest / TextParserTest | 13 | 数字排序、分页边界、翻页动画、文本编码与章节 |
 
-Lint：0 个错误，24 条警告，主要为固定版本的更新提示、KTX 写法和绘制实现建议；未通过关闭错误检查来放行。
-
-Robolectric 4.17 中分别使用 API 28、34、35。漫画原生分块解码使用框架支持的 API 34 环境，执行了实际像素检查；[框架实现依据](https://github.com/robolectric/robolectric/blob/robolectric-4.17/shadows/framework/src/main/java/org/robolectric/shadows/ShadowNativeBitmapRegionDecoder.java)。
-
-## 渲染页面检查
-
-已查看 `.tooling/screenshots/` 中的书架、小说正文、书签和漫画逐页 / 连续阅读截图。漫画内容为本项目生成的色块样例，未使用第三方漫画。
+Robolectric 4.17 使用 API 28 / 34 / 35。漫画渲染用例使用 API 34 的原生图形与实际位图像素；慢解码用例另外用受控解码器验证并发时序。48 页长图是本项目生成的原创不透明色块测试资料，不包含第三方漫画。已查看 `.tooling/screenshots/long-comic-after-fling.png`。
 
 ## 验证边界
 
-- 尚未连接 iQOO Neo6 SE，未进行真实手机安装、文件选择器授权、系统杀进程重开及性能 / 耗电测试。
-- 导入仓库测试使用可读取的本地文件 URI；SAF 目录授权与厂商文件管理器的实际表现需要真机试用。
-- 仿真动画已经检查状态提交与取消；真实触感、帧率和卷曲细节需要在手机上继续调整。
-- 当前支持范围和源文件替换时的限制见 README.md；跨内容版本的锚点迁移未实现。
+- 尚未连接 iQOO Neo6 SE；自动测试不能替代该手机上的帧率、存储读取速度、耗电和安装体验。
+- 预加载范围有限。极快跳到尚未加载的图片、首次读取很大的 ZIP 条目时，仍可能短暂显示加载占位；已加载图片的高清块未就绪时先显示低清预览。
+- 沿用首版的 SAF 授权和内容格式范围；文件选择器授权、系统杀进程后重开仍需真机检查。
+- 本次没有更改小说解析和翻页实现；已有小说回归测试通过。
 
-调试日志：`.tooling/verified-tests.log`、`.tooling/release-signed.log`。完整测试与 Lint 报告位于 `app/build/reports/`。
+本机构建日志：`.tooling/v0.1.1-final-tests.log`、`.tooling/v0.1.1-release.log`；测试与 Lint 报告位于 `app/build/reports/`。

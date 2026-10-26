@@ -19,10 +19,12 @@ if [ ! -f "$MYVIEWER_SIGN_DIR/myviewer.jks" ]; then
     chmod 600 "$MYVIEWER_SIGN_DIR/myviewer.jks"
 fi
 "$PROJECT_DIR/scripts/build.sh" :app:assembleRelease --no-daemon --console=plain
+MYVIEWER_APK_VERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["elements"][0]["versionName"])' "$PROJECT_DIR/app/build/outputs/apk/release/output-metadata.json")
+MYVIEWER_APK_PATH="$PROJECT_DIR/dist/MyViewer-$MYVIEWER_APK_VERSION.apk"
 JAVA_HOME="$JAVA_HOME" "$MYVIEWER_SDK/build-tools/36.0.0/apksigner" sign \
     --ks "$MYVIEWER_SIGN_DIR/myviewer.jks" --ks-key-alias myviewer \
     --ks-pass "file:$MYVIEWER_SIGN_DIR/password" \
-    --out "$PROJECT_DIR/dist/MyViewer-0.1.0.apk" "$PROJECT_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
-JAVA_HOME="$JAVA_HOME" "$MYVIEWER_SDK/build-tools/36.0.0/apksigner" verify --verbose "$PROJECT_DIR/dist/MyViewer-0.1.0.apk"
-printf '\n%s\n' "$PROJECT_DIR/dist/MyViewer-0.1.0.apk"
+    --out "$MYVIEWER_APK_PATH" "$PROJECT_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
+JAVA_HOME="$JAVA_HOME" "$MYVIEWER_SDK/build-tools/36.0.0/apksigner" verify --verbose "$MYVIEWER_APK_PATH"
+printf '\n%s\n' "$MYVIEWER_APK_PATH"
 

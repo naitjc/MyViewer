@@ -33,8 +33,10 @@ import com.chen.myviewer.ReaderSession
 import com.chen.myviewer.data.ReaderSettings
 import com.chen.myviewer.reader.comic.ComicArchive
 import com.chen.myviewer.reader.comic.ComicImageView
+import com.chen.myviewer.reader.comic.ComicPage
+import com.chen.myviewer.reader.comic.ImageSize
 import com.chen.myviewer.reader.text.TextReaderView
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -61,7 +63,9 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
         val originalBrightness = window?.attributes?.screenBrightness ?: -1f
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); window?.let { it.attributes = it.attributes.apply { screenBrightness = originalBrightness } } }
     }
-    SideEffect { window?.let { it.attributes = it.attributes.apply { screenBrightness = settings.brightness } } }
+    LaunchedEffect(window, settings.brightness) {
+        window?.let { if (it.attributes.screenBrightness != settings.brightness) it.attributes = it.attributes.apply { screenBrightness = settings.brightness } }
+    }
 
     Box(Modifier.fillMaxSize().background(if (session.book.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface).windowInsetsPadding(WindowInsets.safeDrawing)) {
         if (session.text != null) {
@@ -155,29 +159,53 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
     }
 }
 
-private data class ComicFile(val file: File? = null, val ratio: Float = .7f, val error: String? = null)
+private data class ComicFile(val page: ComicPage? = null, val size: ImageSize? = null, val error: String? = null) {
+    val ratio: Float get() = size?.let { it.width.toFloat() / it.height } ?: .7f
+}
+private data class ComicViewport(val index: Int, val top: Int, val bottom: Int)
 
 @Composable
-private fun rememberComicFile(archive: ComicArchive, index: Int): State<ComicFile> = produceState(ComicFile(), archive, index) {
-    value = withContext(Dispatchers.IO) { runCatching { val size = archive.size(index); ComicFile(archive.imageFile(index), size.width.toFloat() / size.height) }.getOrElse { ComicFile(error = it.message ?: "图片读取失败") } }
+private fun rememberComicFile(archive: ComicArchive, index: Int): State<ComicFile> {
+    val cached = remember(archive, index) { archive.cachedPage(index) }
+    return key(archive, index) { produceState(ComicFile(cached, cached?.size ?: archive.cachedSize(index)), archive, index) {
+        try {
+            val size = withContext(Dispatchers.IO) { archive.size(index) }
+            if (value.page == null) value = ComicFile(size = size)
+            value = ComicFile(withContext(Dispatchers.IO) { archive.page(index) }, size)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { value = value.copy(error = e.message ?: "图片读取失败") }
+    } }
+}
+
+private suspend fun prefetchComic(archive: ComicArchive, visible: List<Int>, forward: Boolean = true) = withContext(Dispatchers.IO) {
+    if (visible.isEmpty()) return@withContext
+    val first = visible.min(); val last = visible.max()
+    // Load three pages in the travel direction and one behind, including when scrolling back up.
+    val nearby = (visible + (1..3).map { if (forward) last + it else first - it } + listOf(if (forward) first - 1 else last + 1)).filter { it in archive.images.indices }.distinct()
+    for (index in nearby) { ensureActive(); runCatching { archive.page(index) } }
+    // Dimensions are cheap header reads; stable item heights avoid re-layout as full images arrive.
+    for (index in (first - if (forward) 2 else 8).coerceAtLeast(0)..(last + if (forward) 8 else 2).coerceAtMost(archive.images.lastIndex)) {
+        ensureActive(); runCatching { archive.size(index) }
+    }
 }
 
 @Composable
 private fun ComicContent(vm: MainViewModel, session: ReaderSession, menu: () -> Unit) {
     val archive = session.comic!!
     val token = session.position.sessionId
-    var zooming by remember { mutableStateOf<Pair<Int, File>?>(null) }
+    var zooming by remember { mutableStateOf<Pair<Int, ComicPage>?>(null) }
     var zoomRatio by remember { mutableFloatStateOf(0f) }
     if (session.preferences.mode == "PAGE") {
         val image by rememberComicFile(archive, session.position.imageIndex)
+        LaunchedEffect(archive, session.position.imageIndex) { prefetchComic(archive, listOf(session.position.imageIndex)) }
         Box(Modifier.fillMaxSize()) {
-            if (image.file != null) AndroidView(factory = { ComicImageView(it) }, update = { view ->
+            if (image.page != null) AndroidView(factory = { ComicImageView(it) }, update = { view ->
                 view.rtl = session.preferences.direction == "RTL"
                 view.onMenu = menu
                 view.onPage = { next -> if (vm.reader.value?.position?.sessionId == token) vm.seekComic(session.position.imageIndex + if (next) 1 else -1) }
                 view.onFocus = { ratio -> if (vm.reader.value?.position?.sessionId == token) vm.comicPosition(session.position.imageIndex, ratio) }
                 view.onError = { vm.notice.value = it }
-                view.setImage(image.file!!)
+                view.setPage(image.page!!)
             }, modifier = Modifier.fillMaxSize())
             else ComicPlaceholder(image.error, Modifier.fillMaxSize())
             Text("${session.position.imageIndex + 1} / ${archive.images.size}", Modifier.align(Alignment.BottomEnd).padding(16.dp), color = Color.White.copy(alpha = .65f), style = MaterialTheme.typography.labelSmall)
@@ -185,6 +213,8 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, menu: () -> 
     } else {
         val state = rememberLazyListState(initialFirstVisibleItemIndex = session.position.imageIndex)
         val sizes = remember(archive) { mutableStateMapOf<Int, Int>() }
+        val imageViews = remember(archive) { mutableMapOf<Int, ComicImageView>() }
+        val viewports = remember(archive) { mutableMapOf<Int, ComicViewport>() }
         var restored by remember { mutableStateOf(false) }
         LaunchedEffect(session.jump, archive) {
             restored = false
@@ -197,6 +227,23 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, menu: () -> 
             restored = true
         }
         LaunchedEffect(state, archive) {
+            snapshotFlow {
+                val info = state.layoutInfo
+                info.visibleItemsInfo.map { ComicViewport(it.index, (-it.offset).coerceAtLeast(0), (info.viewportEndOffset - it.offset).coerceAtMost(it.size)) }
+            }.collect { windows ->
+                viewports.clear()
+                for (window in windows) { viewports[window.index] = window; imageViews[window.index]?.updateViewport(window.top, window.bottom) }
+            }
+        }
+        LaunchedEffect(state, archive) {
+            var previous = state.firstVisibleItemIndex
+            var forward = true
+            snapshotFlow { state.layoutInfo.visibleItemsInfo.map { it.index } }.distinctUntilChanged().collectLatest { indices ->
+                indices.firstOrNull()?.let { first -> if (first != previous) { forward = first > previous; previous = first } }
+                prefetchComic(archive, indices, forward)
+            }
+        }
+        LaunchedEffect(state, archive) {
             snapshotFlow { Triple(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, state.isScrollInProgress) }.distinctUntilChanged().collect { (index, offset, scrolling) ->
                 if (restored && vm.reader.value?.position?.sessionId == token) {
                     val height = sizes[index] ?: state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.size ?: 1
@@ -204,13 +251,16 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, menu: () -> 
                 }
             }
         }
-        LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxSize()) {
+        LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
             itemsIndexed(archive.images, key = { _, it -> it.name }) { index, _ ->
                 val image by rememberComicFile(archive, index)
-                if (image.file != null) {
-                    val zoom: () -> Unit = { zooming = index to image.file!!; zoomRatio = session.position.imageRatio }
-                    AndroidView(factory = { ComicImageView(it).apply { interactive = false } }, update = { it.setImage(image.file!!) }, modifier = Modifier.fillMaxWidth().aspectRatio(image.ratio.coerceAtLeast(.005f)).onSizeChanged { sizes[index] = it.height }
-                        .pointerInput(image.file) {
+                val itemModifier = Modifier.fillMaxWidth().then(if (image.size != null) Modifier.aspectRatio(image.ratio.coerceAtLeast(.005f)) else Modifier.height(300.dp)).onSizeChanged { if (image.size != null) sizes[index] = it.height }
+                if (image.page != null) {
+                    val zoom: () -> Unit = { zooming = index to image.page!!; zoomRatio = session.position.imageRatio }
+                    AndroidView(factory = { ComicImageView(it).apply { interactive = false }.also { imageViews[index] = it } },
+                        onRelease = { if (imageViews[index] === it) imageViews.remove(index) },
+                        update = { view -> view.setPage(image.page!!); viewports[index]?.let { view.updateViewport(it.top, it.bottom) } },
+                        modifier = itemModifier.pointerInput(image.page) {
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
                                 do {
@@ -219,15 +269,15 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, menu: () -> 
                                 } while (event.changes.any { it.pressed })
                             }
                         }.combinedClickable(onClick = menu, onDoubleClick = zoom))
-                } else ComicPlaceholder(image.error, Modifier.fillMaxWidth().height(300.dp))
+                } else ComicPlaceholder(image.error, itemModifier)
             }
         }
     }
-    zooming?.let { (index, file) ->
+    zooming?.let { (index, page) ->
         val closeZoom: () -> Unit = { vm.seekComic(index, zoomRatio); zooming = null }
         Dialog(onDismissRequest = closeZoom, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
             Box(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing)) {
-                AndroidView(factory = { ComicImageView(it) }, update = { view -> view.onFocus = { zoomRatio = it }; view.onError = { vm.notice.value = it }; view.setImage(file, 2.5f) }, modifier = Modifier.fillMaxSize())
+                AndroidView(factory = { ComicImageView(it) }, update = { view -> view.tapToTurn = false; view.onFocus = { zoomRatio = it }; view.onError = { vm.notice.value = it }; view.setPage(page, 2.5f) }, modifier = Modifier.fillMaxSize())
                 FilledTonalIconButton(onClick = closeZoom, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) { Icon(Icons.Outlined.Close, "结束图片放大") }
             }
         }

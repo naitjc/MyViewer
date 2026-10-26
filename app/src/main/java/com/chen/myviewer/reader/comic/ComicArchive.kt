@@ -2,6 +2,7 @@ package com.chen.myviewer.reader.comic
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.util.LruCache
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.Xml
@@ -13,6 +14,9 @@ import java.io.File
 import java.io.FileInputStream
 import java.nio.channels.SeekableByteChannel
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.*
 
 object NaturalOrder : Comparator<String> {
     private val pieces = Regex("[0-9]+|[^0-9]+")
@@ -41,6 +45,10 @@ class ComicArchive private constructor(private val zip: ZipFile, private val dir
     }.map { ComicImage(it.name, it) }.sortedWith { a, b -> NaturalOrder.compare(a.name, b.name) }.toList()
     val direction: String = readDirection()
     private val lock = Any()
+    private val dimensions = ConcurrentHashMap<Int, ImageSize>()
+    private val previews = object : LruCache<Int, ComicPage>(16 * 1024 * 1024) {
+        override fun sizeOf(key: Int, value: ComicPage) = value.preview.allocationByteCount
+    }
     @Volatile private var closed = false
 
     fun imageFile(index: Int): File = synchronized(lock) {
@@ -65,14 +73,29 @@ class ComicArchive private constructor(private val zip: ZipFile, private val dir
             require(pending.length() > 0) { "这张图片没有内容。" }
             check(pending.renameTo(target)) { "图片缓存写入失败。" }
         } finally { pending.delete() }
-        trimCache(target)
+        // Maintenance must not hold up the next foreground image read.
+        if (trimPending.compareAndSet(false, true)) maintenanceScope.launch {
+            try { delay(750); runCatching { trimCache(target) } } finally { trimPending.set(false) }
+        }
         target
     }
-    fun size(index: Int): ImageSize {
+    fun size(index: Int): ImageSize = dimensions[index] ?: synchronized(lock) {
+        dimensions[index]?.let { return@synchronized it }
+        check(!closed) { "漫画已经关闭，请重新打开。" }
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(imageFile(index).absolutePath, options)
+        // Read only the image header, without extracting the entire ZIP entry.
+        zip.getInputStream(images[index].entry).buffered().use { BitmapFactory.decodeStream(it, null, options) }
         require(options.outWidth > 0 && options.outHeight > 0) { "图片无法解码。" }
-        return ImageSize(options.outWidth, options.outHeight)
+        ImageSize(options.outWidth, options.outHeight).also { dimensions[index] = it }
+    }
+    fun cachedSize(index: Int): ImageSize? = dimensions[index]
+    fun cachedPage(index: Int): ComicPage? = synchronized(previews) { previews.get(index) }
+    fun page(index: Int): ComicPage = synchronized(lock) {
+        check(!closed) { "漫画已经关闭，请重新打开。" }
+        cachedPage(index)?.takeIf { it.file.exists() }?.let { return@synchronized it }
+        val size = size(index)
+        val file = imageFile(index)
+        ComicPage(file, size, ComicPreviews.decode(file, size)).also { synchronized(previews) { previews.put(index, it) } }
     }
     fun suggestMode(): String {
         val sample = images.indices.take(6).mapNotNull { runCatching { size(it) }.getOrNull() }
@@ -91,7 +114,7 @@ class ComicArchive private constructor(private val zip: ZipFile, private val dir
         }
         "LTR"
     }.getOrDefault("LTR")
-    override fun close() = synchronized(lock) { if (!closed) { closed = true; zip.close() } }
+    override fun close() = synchronized(lock) { if (!closed) { closed = true; zip.close(); synchronized(previews) { previews.evictAll() } } }
     private fun trimCache(keep: File) {
         val root = directory.parentFile ?: return
         synchronized(cacheLock) {
@@ -106,6 +129,8 @@ class ComicArchive private constructor(private val zip: ZipFile, private val dir
 
     companion object {
         private val cacheLock = Any()
+        private val trimPending = AtomicBoolean(false)
+        private val maintenanceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private const val CACHE_LIMIT = 256L * 1024 * 1024
         @Suppress("DEPRECATION")
         fun open(context: Context, book: Book): ComicArchive {
@@ -122,7 +147,12 @@ class ComicArchive private constructor(private val zip: ZipFile, private val dir
                 }
             } catch (e: Exception) { input.close(); throw e }
         }
-        fun digest(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+        fun digest(value: String): String {
+            val bytes = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
+            val chars = CharArray(bytes.size * 2); val hex = "0123456789abcdef"
+            bytes.forEachIndexed { index, byte -> val value = byte.toInt() and 255; chars[index * 2] = hex[value ushr 4]; chars[index * 2 + 1] = hex[value and 15] }
+            return String(chars)
+        }
     }
 }
 

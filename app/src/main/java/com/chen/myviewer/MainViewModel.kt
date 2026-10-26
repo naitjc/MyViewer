@@ -46,6 +46,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var sequence = 0L
     private var lastSave = 0L
     private var closeSave: Deferred<Unit>? = null
+    private var latestComicPosition: ReadingPosition? = null
+    private var lastComicPublication = 0L
 
     init { viewModelScope.launch { for (position in saves) runCatching { repository.save(position) }.onFailure { notice.value = "阅读位置保存失败，请检查存储空间。" } } }
 
@@ -99,6 +101,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (text != null) position = position.copy(textOffset = position.textOffset.coerceIn(0, (text.text.length - 1).coerceAtLeast(0)))
                 sequence = 0L
+                latestComicPosition = null; lastComicPublication = 0L
                 reader.value = ReaderSession(book, position, prefs, text, archive)
             } catch (e: CancellationException) { withContext(NonCancellable + Dispatchers.IO) { archive?.close() }; throw e }
             catch (e: Exception) { withContext(Dispatchers.IO) { archive?.close() }; error.value = e.message ?: "书籍暂时无法打开"; failedBook.value = book }
@@ -116,7 +119,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val safe = index.coerceIn(0, archive.images.lastIndex)
         val progress = if (session.preferences.mode == "PAGE") (safe + 1f) / archive.images.size else (safe + ratio.coerceIn(0f, 1f)) / archive.images.size
         val position = session.position.copy(imageIndex = safe, imageEntry = archive.images[safe].name, imageRatio = ratio.coerceIn(0f, 1f), progress = progress, sequence = ++sequence)
-        reader.value = session.copy(position = position); enqueue(position, force)
+        latestComicPosition = position
+        val now = android.os.SystemClock.uptimeMillis()
+        if (force || safe != session.position.imageIndex || now - lastComicPublication >= 200) {
+            lastComicPublication = now; reader.value = session.copy(position = position)
+        }
+        enqueue(position, force)
     }
     fun seekText(offset: Int) { reader.update { it?.copy(jump = it.jump + 1, jumpOffset = offset) } }
     fun seekComic(index: Int, ratio: Float = 0f) { comicPosition(index, ratio); reader.update { it?.copy(jump = it.jump + 1) } }
@@ -124,8 +132,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val now = android.os.SystemClock.uptimeMillis()
         if (force || now - lastSave >= 700) { lastSave = now; saves.trySend(position) }
     }
-    fun flushPosition() { reader.value?.position?.let { enqueue(it, true) } }
+    fun flushPosition() {
+        val session = reader.value ?: return
+        val position = latestComicPosition?.takeIf { it.sessionId == session.position.sessionId } ?: session.position
+        reader.value = session.copy(position = position); enqueue(position, true)
+    }
     fun mode(mode: String) = viewModelScope.launch {
+        flushPosition()
         val session = reader.value ?: return@launch
         val prefs = session.preferences.copy(mode = mode)
         repository.dao.putPreferences(prefs); reader.update { current -> if (current?.book?.id == session.book.id) current.copy(preferences = prefs) else current }
@@ -144,7 +157,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteBookmark(id: String) = viewModelScope.launch { repository.dao.deleteBookmark(id) }
     fun closeReader() {
         val previous = reader.value
-        previous?.position?.let { position -> closeSave = viewModelScope.async { repository.save(position.copy(sequence = ++sequence)) } }
+        val position = latestComicPosition?.takeIf { it.sessionId == previous?.position?.sessionId } ?: previous?.position
+        position?.let { closeSave = viewModelScope.async { repository.save(it.copy(sequence = ++sequence)) } }
+        latestComicPosition = null
         reader.value = null; loading.value = null; openJob?.cancel()
         viewModelScope.launch(Dispatchers.IO) { previous?.comic?.close() }
     }
