@@ -39,13 +39,14 @@ data class ComicImage(val name: String, val entry: ZipArchiveEntry)
 data class ImageSize(val width: Int, val height: Int)
 
 class ComicArchive private constructor(private val zip: ZipFile, private val directory: File) : Closeable {
-    val images: List<ComicImage> = zip.entries.asSequence().filter {
+    private val entrySizes = ConcurrentHashMap<ZipArchiveEntry, ImageSize>()
+    private val imageIndex = ComicImageIndex(zip.entries.asSequence().filter {
         !it.isDirectory && !it.name.split('/').any { part -> part.startsWith('.') || part == "__MACOSX" } &&
             it.name.substringAfterLast('.').lowercase() in setOf("jpg", "jpeg", "png", "webp") && zip.canReadEntryData(it)
-    }.map { ComicImage(it.name, it) }.sortedWith { a, b -> NaturalOrder.compare(a.name, b.name) }.toList()
+    }.map { ComicImage(it.name, it) }.toList()) { image -> runCatching { readSize(image) }.getOrNull() }
+    val images: List<ComicImage> = imageIndex.images
     val direction: String = readDirection()
     private val lock = Any()
-    private val dimensions = ConcurrentHashMap<Int, ImageSize>()
     private val previews = object : LruCache<Int, ComicPage>(16 * 1024 * 1024) {
         override fun sizeOf(key: Int, value: ComicPage) = value.preview.allocationByteCount
     }
@@ -79,16 +80,19 @@ class ComicArchive private constructor(private val zip: ZipFile, private val dir
         }
         target
     }
-    fun size(index: Int): ImageSize = dimensions[index] ?: synchronized(lock) {
-        dimensions[index]?.let { return@synchronized it }
-        check(!closed) { "漫画已经关闭，请重新打开。" }
+    private fun readSize(image: ComicImage): ImageSize = entrySizes[image.entry] ?: run {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        // Read only the image header, without extracting the entire ZIP entry.
-        zip.getInputStream(images[index].entry).buffered().use { BitmapFactory.decodeStream(it, null, options) }
+        zip.getInputStream(image.entry).buffered().use { BitmapFactory.decodeStream(it, null, options) }
         require(options.outWidth > 0 && options.outHeight > 0) { "图片无法解码。" }
-        ImageSize(options.outWidth, options.outHeight).also { dimensions[index] = it }
+        ImageSize(options.outWidth, options.outHeight).also { entrySizes[image.entry] = it }
     }
-    fun cachedSize(index: Int): ImageSize? = dimensions[index]
+    fun size(index: Int): ImageSize = entrySizes[images[index].entry] ?: synchronized(lock) {
+        check(!closed) { "漫画已经关闭，请重新打开。" }
+        // Read only the image header, without extracting the entire ZIP entry.
+        readSize(images[index])
+    }
+    fun cachedSize(index: Int): ImageSize? = entrySizes[images[index].entry]
+    fun restoreIndex(entry: String, fallback: Int): Int = imageIndex.restoreIndex(entry, fallback)
     fun cachedPage(index: Int): ComicPage? = synchronized(previews) { previews.get(index) }
     fun page(index: Int): ComicPage = synchronized(lock) {
         check(!closed) { "漫画已经关闭，请重新打开。" }

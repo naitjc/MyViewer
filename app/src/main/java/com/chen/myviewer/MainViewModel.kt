@@ -98,8 +98,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.also { repository.dao.putPreferences(it) }
                 var position = repository.startSession(book)
                 if (archive != null) {
-                    val matched = archive.images.indexOfFirst { it.name == position.imageEntry }
-                    position = position.copy(imageIndex = (if (matched >= 0) matched else position.imageIndex).coerceIn(0, archive.images.lastIndex))
+                    val index = archive.restoreIndex(position.imageEntry, position.imageIndex)
+                    position = position.copy(imageIndex = index, imageEntry = archive.images[index].name,
+                        progress = (index + if (prefs.mode == "PAGE") 1f else position.imageRatio) / archive.images.size)
                 }
                 if (text != null) position = position.copy(textOffset = position.textOffset.coerceIn(0, (text.text.length - 1).coerceAtLeast(0)))
                 sequence = 0L
