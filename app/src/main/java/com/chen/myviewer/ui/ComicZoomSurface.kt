@@ -43,7 +43,17 @@ internal class ComicCanvasState {
         if (zoomed) { scale = 1f; pan = Offset.Zero }
         else transform(2.5f, Offset.Zero, anchor) {}
     }
-    fun hold(anchor: Offset) { held = scale to pan; transform(2.5f, Offset.Zero, anchor) {} }
+    fun hold(anchor: Offset) { held = scale to pan; moveHold(anchor) }
+    fun moveHold(anchor: Offset) {
+        val saved = held ?: return
+        val center = Offset(size.width / 2f, size.height / 2f)
+        scale = (saved.first * 2.5f).coerceAtMost(8f)
+        val factor = scale / saved.first
+        val offset = saved.second * factor + (anchor - center) * (1f - factor)
+        val limitX = size.width * (scale - 1f) / 2
+        val limitY = size.height * (scale - 1f) / 2
+        pan = Offset(offset.x.coerceIn(-limitX, limitX), offset.y.coerceIn(-limitY, limitY))
+    }
     fun release() { held?.let { scale = it.first; pan = it.second }; held = null }
     fun visibleTop(height: Int): Float = height / 2f + (-height / 2f - pan.y) / scale
     fun visibleBottom(height: Int): Float = height / 2f + (height / 2f - pan.y) / scale
@@ -68,12 +78,13 @@ internal fun ComicZoomSurface(state: ComicCanvasState, menu: () -> Unit, overflo
                 var multi = false
                 var holding = false
                 var lastTime = down.uptimeMillis
+                var lastPosition = down.position
                 try {
                     while (true) {
                         val event = if (tap && !holding && !multi) {
                             withTimeoutOrNull((down.uptimeMillis + viewConfiguration.longPressTimeoutMillis - lastTime).coerceAtLeast(1)) { awaitPointerEvent(PointerEventPass.Initial) }
                         } else awaitPointerEvent(PointerEventPass.Initial)
-                        if (event == null) { state.hold(down.position); holding = true; tap = false; lastTapTime = -10000; continue }
+                        if (event == null) { state.hold(lastPosition); holding = true; tap = false; lastTapTime = -10000; continue }
                         lastTime = event.changes.maxOf { it.uptimeMillis }
                         val pressed = event.changes.count { it.pressed }
                         if (pressed >= 2) {
@@ -82,10 +93,12 @@ internal fun ComicZoomSurface(state: ComicCanvasState, menu: () -> Unit, overflo
                             state.transform(event.calculateZoom(), event.calculatePan(), event.calculateCentroid(useCurrent = false), onOverflow)
                             event.changes.forEach { it.consume() }
                         } else {
+                            event.changes.firstOrNull { it.id == down.id }?.let { lastPosition = it.position }
                             val moved = event.changes.firstOrNull { it.id == down.id }?.let { (it.position - down.position).getDistance() > viewConfiguration.touchSlop } ?: false
                             if (moved) tap = false
                             if (pressed > 0 && (holding || multi || (state.zoomed && !tap))) {
-                                state.transform(1f, event.calculatePan(), event.calculateCentroid(useCurrent = false), onOverflow)
+                                if (holding) state.moveHold(lastPosition)
+                                else state.transform(1f, event.calculatePan(), event.calculateCentroid(useCurrent = false), onOverflow)
                                 event.changes.forEach { it.consume() }
                             }
                         }

@@ -68,7 +68,7 @@ class ComicImageView internal constructor(context: Context, private val openRast
             if (sourceWidth <= 0) return
             heldTransform = Transform(zoom, panX, panY)
             parent?.requestDisallowInterceptTouchEvent(true)
-            zoomAt((zoom * 2.5f).coerceAtMost(8f), e.x, e.y)
+            moveHold(e.x, e.y)
         }
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
             if (zoom > 1.01f) { panX -= distanceX; panY -= distanceY; clamp(); invalidate(); reportFocus(); return true }
@@ -139,6 +139,15 @@ class ComicImageView internal constructor(context: Context, private val openRast
         val saved = heldTransform ?: return
         heldTransform = null; zoom = saved.zoom; panX = saved.x; panY = saved.y
         clamp(); invalidate(); reportFocus()
+    }
+
+    private fun moveHold(x: Float, y: Float) {
+        val saved = heldTransform ?: return
+        zoom = (saved.zoom * 2.5f).coerceAtMost(8f)
+        val factor = zoom / saved.zoom
+        panX = saved.x * factor + (x - width / 2f) * (1f - factor)
+        panY = saved.y * factor + (y - height / 2f) * (1f - factor)
+        clamp(); invalidate()
     }
 
     /** Lazy-list translation does not necessarily redraw an Android View's display list. */
@@ -235,6 +244,8 @@ class ComicImageView internal constructor(context: Context, private val openRast
         if (!interactive) return false
         if (event.actionMasked == MotionEvent.ACTION_DOWN) { releaseHold(); wasScaling = false }
         if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) releaseHold()
+        // GestureDetector stops delivering scroll callbacks after recognizing a long press.
+        if (event.actionMasked == MotionEvent.ACTION_MOVE && event.pointerCount == 1 && heldTransform != null) moveHold(event.x, event.y)
         scale.onTouchEvent(event); touch.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) { releaseHold(); onGestureEnd() }
         if (zoom > 1.01f || scale.isInProgress) parent?.requestDisallowInterceptTouchEvent(true)

@@ -38,21 +38,29 @@ class ComicThumbnailFlowTest {
     }
 
     @Test fun directAndCopiedComicsShowTwentyPagesAndRestoreOldThumbnailPosition() {
+        checkThumbnailComic("_thumb")
+    }
+
+    @Test fun trailingTComicShowsTwentyPagesInBothModesAndImportChoices() {
+        checkThumbnailComic("t")
+    }
+
+    private fun checkThumbnailComic(suffix: String) {
         val model = vm
         val entries = linkedMapOf<String, Pair<Int, Int>>()
         repeat(20) { index ->
             val name = (index + 1).toString().padStart(3, '0')
-            entries["$name.png"] = 160 to 320; entries["${name}_thumb.png"] = 40 to 80
+            entries["$name.png"] = 160 to 320; entries["$name$suffix.png"] = 40 to 80
         }
         for (copy in listOf(false, true)) {
-            val source = File(compose.activity.cacheDir, "20页含缩略图-$copy.zip")
+            val source = File(compose.activity.cacheDir, "20页含缩略图-$suffix-$copy.zip")
             try {
                 TestComicZip.write(source, entries)
                 val book = runBlocking {
                     val result = model.repository.import(listOf(ImportCandidate(Uri.fromFile(source), source.name, source.length())), copy) { _, _ -> }
                     assertEquals(result.failures.toString(), 1, result.added)
                     val imported = model.repository.dao.observeLibrary().first().single { it.book.sourceUri == Uri.fromFile(source).toString() }.book
-                    model.repository.dao.putPosition(ReadingPosition(imported.id, imageIndex = 19, imageEntry = "010_thumb.png", imageRatio = .25f, progress = .5f))
+                    model.repository.dao.putPosition(ReadingPosition(imported.id, imageIndex = 19, imageEntry = "010$suffix.png", imageRatio = .25f, progress = .5f))
                     model.repository.dao.putPreferences(BookPreferences(imported.id, "PAGE"))
                     imported
                 }

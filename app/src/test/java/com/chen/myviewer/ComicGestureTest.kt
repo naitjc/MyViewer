@@ -22,6 +22,26 @@ import java.time.Duration
 @Config(sdk = [34], application = android.app.Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ComicGestureTest {
+    @Test fun heldMagnificationFollowsTheFingerAcrossTheOriginalPage() = withView { view, page ->
+        view.setPage(page)
+        val before = pixels(view)
+        var turns = 0; var menus = 0
+        val positions = mutableListOf<Float>()
+        view.onPage = { turns++ }; view.onMenu = { menus++ }; view.onFocus = { positions += it }
+        val down = SystemClock.uptimeMillis()
+        event(view, down, MotionEvent.ACTION_DOWN, 180f to 400f)
+        idle(ViewConfiguration.getLongPressTimeout().toLong() + 100)
+        assertEquals(Color.RED, pixels(view)[400 * 400 + 180])
+        event(view, down, MotionEvent.ACTION_MOVE, 320f to 400f)
+        assertEquals("Moving right must reveal the right-hand region of the original page", Color.BLUE, pixels(view)[400 * 400 + 320])
+        event(view, down, MotionEvent.ACTION_MOVE, 60f to 60f)
+        assertEquals("The held focus must follow both axes", Color.GREEN, pixels(view)[60 * 400 + 60])
+        assertTrue("Temporary focus must not overwrite the reading position", positions.isEmpty())
+        event(view, down, MotionEvent.ACTION_UP, 60f to 60f); idle(400)
+        assertArrayEquals(before, pixels(view))
+        assertEquals(0, turns); assertEquals(0, menus)
+    }
+
     @Test fun heldMagnificationRestoresOnReleaseWithoutTurningOrOpeningMenu() = withView { view, page ->
         view.setPage(page)
         var turns = 0; var menus = 0
@@ -52,6 +72,7 @@ class ComicGestureTest {
         event(view, hold, MotionEvent.ACTION_DOWN, 60f to 400f)
         idle(ViewConfiguration.getLongPressTimeout().toLong() + 100)
         assertFalse(zoomed.contentEquals(pixels(view)))
+        event(view, hold, MotionEvent.ACTION_MOVE, 320f to 620f)
         event(view, hold, MotionEvent.ACTION_CANCEL, 60f to 400f)
         assertArrayEquals(zoomed, pixels(view))
     }
