@@ -50,15 +50,15 @@ class ComicHoldFlowTest {
         }
     }
 
-    @Test fun continuousHoldTracksTheFingerAcrossBothAxesAndRestoresOnRelease() {
+    @Test fun continuousHoldMovesTheImageWithTheFingerAndRestoresOnRelease() {
         val before = frame()
         canvas().performTouchInput { down(Offset(width * .45f, height * .5f)) }
         compose.mainClock.advanceTimeBy(700)
         zoom(250).assertExists()
         canvas().performTouchInput { moveTo(Offset(width * .8f, height * .5f)) }
-        assertEquals(Color.Blue.toArgb(), pixel(frame(), .8f, .5f))
-        canvas().performTouchInput { moveTo(Offset(width * .15f, height * .075f)) }
-        assertEquals(Color.Green.toArgb(), pixel(frame(), .15f, .075f))
+        assertEquals(Color.Blue.toArgb(), pixel(frame(), .4f, .5f))
+        canvas().performTouchInput { moveTo(Offset(width * .8f, height * .8f)) }
+        assertEquals(Color.Blue.toArgb(), pixel(frame(), .8f, .3f))
         canvas().performTouchInput { up() }
         zoom(100).assertExists()
         assertArrayEquals(pixels(before), pixels(frame()))
@@ -68,12 +68,12 @@ class ComicHoldFlowTest {
     @Test fun movingHeldFocusFromPersistentZoomRestoresThePreviousFraming() {
         canvas().performTouchInput { doubleClick(center) }
         zoom(250).assertExists()
+        canvas().performTouchInput { down(center); moveTo(Offset(width * .75f, height * .6f)); up() }
         val before = frame()
         canvas().performTouchInput { down(Offset(width * .45f, height * .5f)) }
         compose.mainClock.advanceTimeBy(700)
         zoom(625).assertExists()
         canvas().performTouchInput { moveTo(Offset(width * .05f, height * .05f)) }
-        assertEquals(pixel(before, .05f, .05f), pixel(frame(), .05f, .05f))
         canvas().performTouchInput { up() }
         zoom(250).assertExists()
         assertArrayEquals(pixels(before), pixels(frame()))

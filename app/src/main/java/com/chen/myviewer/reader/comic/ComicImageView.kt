@@ -34,7 +34,7 @@ class ComicImageView internal constructor(context: Context, private val openRast
     private var panY = 0f
     private var initialZoom = 1f
     private var wasScaling = false
-    private data class Transform(val zoom: Float, val x: Float, val y: Float)
+    private data class Transform(val zoom: Float, val x: Float, val y: Float, val anchorX: Float, val anchorY: Float)
     private var heldTransform: Transform? = null
     private var displayScale = 1f
     private var lastError = ""
@@ -66,7 +66,7 @@ class ComicImageView internal constructor(context: Context, private val openRast
         override fun onDoubleTap(e: MotionEvent): Boolean { zoomAt(if (zoom > 1.1f) 1f else 2.5f, e.x, e.y); return true }
         override fun onLongPress(e: MotionEvent) {
             if (sourceWidth <= 0) return
-            heldTransform = Transform(zoom, panX, panY)
+            heldTransform = Transform(zoom, panX, panY, e.x, e.y)
             parent?.requestDisallowInterceptTouchEvent(true)
             moveHold(e.x, e.y)
         }
@@ -145,8 +145,8 @@ class ComicImageView internal constructor(context: Context, private val openRast
         val saved = heldTransform ?: return
         zoom = (saved.zoom * 2.5f).coerceAtMost(8f)
         val factor = zoom / saved.zoom
-        panX = saved.x * factor + (x - width / 2f) * (1f - factor)
-        panY = saved.y * factor + (y - height / 2f) * (1f - factor)
+        panX = saved.x * factor + (2f * saved.anchorX - x - width / 2f) * (1f - factor)
+        panY = saved.y * factor + (2f * saved.anchorY - y - height / 2f) * (1f - factor)
         clamp(); invalidate()
     }
 

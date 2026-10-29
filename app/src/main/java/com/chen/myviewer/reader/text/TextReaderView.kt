@@ -46,6 +46,24 @@ class TextReaderView(context: Context) : View(context) {
     private var background = Color.rgb(243, 234, 217)
     private var lastReport = 0L
     val currentOffset: Int get() = anchor
+    val readyForAutoReading: Boolean get() = paginator != null && page != null && animator?.isRunning != true
+
+    fun nextAutomatically(): Boolean {
+        if (!readyForAutoReading || animator?.isRunning == true) return true
+        val current = page ?: return true
+        if (paginator?.adjacent(current, true) == null) return false
+        prepare(true); animateTurn(true)
+        return true
+    }
+
+    fun scrollAutomatically(distance: Float): Boolean {
+        val engine = paginator ?: return true
+        if (engine.chunks.isEmpty()) return false
+        scroller.forceFinished(true)
+        moveScroll(distance)
+        val lastTop = max(0f, engine.chunk(engine.chunks.lastIndex).layout.height - (height - top - margin - 20 * density))
+        return scrollChunk < engine.chunks.lastIndex || scrollYLocal < lastTop - .01f
+    }
 
     private val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean { scroller.forceFinished(true); return true }

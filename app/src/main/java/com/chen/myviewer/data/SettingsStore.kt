@@ -19,6 +19,8 @@ data class ReaderSettings(
     val brightness: Float = -1f,
     val animation: String = "SLIDE",
     val copyOnImport: Boolean = false,
+    val autoPageSeconds: Int = 10,
+    val autoScrollSpeed: Int = 3,
 )
 
 class SettingsStore internal constructor(private val store: DataStore<Preferences>) {
@@ -31,6 +33,8 @@ class SettingsStore internal constructor(private val store: DataStore<Preference
     private val copy = booleanPreferencesKey("copy_on_import")
     private val sort = stringPreferencesKey("library_sort")
     private val columns = intPreferencesKey("library_columns")
+    private val autoPage = intPreferencesKey("auto_page_seconds")
+    private val autoScroll = intPreferencesKey("auto_scroll_speed")
     private val preferences = store.data.catch { if (it is IOException) emit(emptyPreferences()) else throw it }
     val librarySort = preferences.map { prefs -> LibrarySort.entries.firstOrNull { it.name == prefs[sort] } ?: LibrarySort.RECENT }
     val libraryColumns = preferences.map { (it[columns] ?: 3).coerceIn(1, 6) }
@@ -38,6 +42,7 @@ class SettingsStore internal constructor(private val store: DataStore<Preference
         ReaderSettings(
             (it[font] ?: 20f).coerceIn(14f, 36f), (it[spacing] ?: 1.65f).coerceIn(1.2f, 2.3f),
             it[bg] ?: "PAPER", (it[light] ?: -1f).coerceIn(-1f, 1f), it[animation] ?: "SLIDE", it[copy] ?: false,
+            (it[autoPage] ?: 10).coerceIn(2, 60), (it[autoScroll] ?: 3).coerceIn(1, 10),
         )
     }
     suspend fun setLibrarySort(value: LibrarySort) { store.edit { it[sort] = value.name } }
@@ -45,6 +50,7 @@ class SettingsStore internal constructor(private val store: DataStore<Preference
     suspend fun update(value: ReaderSettings) { store.edit {
         it[font] = value.fontSize; it[spacing] = value.lineSpacing; it[bg] = value.background
         it[light] = value.brightness; it[animation] = value.animation; it[copy] = value.copyOnImport
+        it[autoPage] = value.autoPageSeconds.coerceIn(2, 60); it[autoScroll] = value.autoScrollSpeed.coerceIn(1, 10)
     } }
 }
 

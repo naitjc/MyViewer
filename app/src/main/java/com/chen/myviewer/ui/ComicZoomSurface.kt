@@ -26,6 +26,7 @@ internal class ComicCanvasState {
     var pan by mutableStateOf(Offset.Zero); private set
     var size by mutableStateOf(IntSize.Zero)
     private var held: Pair<Float, Offset>? = null
+    private var heldAnchor = Offset.Zero
     val zoomed: Boolean get() = scale > 1.01f
 
     fun transform(factor: Float, delta: Offset, anchor: Offset, overflow: (Float) -> Unit) {
@@ -43,13 +44,13 @@ internal class ComicCanvasState {
         if (zoomed) { scale = 1f; pan = Offset.Zero }
         else transform(2.5f, Offset.Zero, anchor) {}
     }
-    fun hold(anchor: Offset) { held = scale to pan; moveHold(anchor) }
+    fun hold(anchor: Offset) { held = scale to pan; heldAnchor = anchor; moveHold(anchor) }
     fun moveHold(anchor: Offset) {
         val saved = held ?: return
         val center = Offset(size.width / 2f, size.height / 2f)
         scale = (saved.first * 2.5f).coerceAtMost(8f)
         val factor = scale / saved.first
-        val offset = saved.second * factor + (anchor - center) * (1f - factor)
+        val offset = saved.second * factor + (heldAnchor * 2f - anchor - center) * (1f - factor)
         val limitX = size.width * (scale - 1f) / 2
         val limitY = size.height * (scale - 1f) / 2
         pan = Offset(offset.x.coerceIn(-limitX, limitX), offset.y.coerceIn(-limitY, limitY))

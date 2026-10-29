@@ -22,7 +22,7 @@ import java.time.Duration
 @Config(sdk = [34], application = android.app.Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ComicGestureTest {
-    @Test fun heldMagnificationFollowsTheFingerAcrossTheOriginalPage() = withView { view, page ->
+    @Test fun heldMagnificationMovesTheImageWithTheFingerAndRestoresOnRelease() = withView { view, page ->
         view.setPage(page)
         val before = pixels(view)
         var turns = 0; var menus = 0
@@ -33,11 +33,11 @@ class ComicGestureTest {
         idle(ViewConfiguration.getLongPressTimeout().toLong() + 100)
         assertEquals(Color.RED, pixels(view)[400 * 400 + 180])
         event(view, down, MotionEvent.ACTION_MOVE, 320f to 400f)
-        assertEquals("Moving right must reveal the right-hand region of the original page", Color.BLUE, pixels(view)[400 * 400 + 320])
-        event(view, down, MotionEvent.ACTION_MOVE, 60f to 60f)
-        assertEquals("The held focus must follow both axes", Color.GREEN, pixels(view)[60 * 400 + 60])
+        assertEquals("Dragging right must move the red image region right", Color.BLUE, pixels(view)[400 * 400 + 160])
+        event(view, down, MotionEvent.ACTION_MOVE, 320f to 640f)
+        assertEquals("Dragging down must move the red image region down", Color.BLUE, pixels(view)[280 * 400 + 320])
         assertTrue("Temporary focus must not overwrite the reading position", positions.isEmpty())
-        event(view, down, MotionEvent.ACTION_UP, 60f to 60f); idle(400)
+        event(view, down, MotionEvent.ACTION_UP, 320f to 640f); idle(400)
         assertArrayEquals(before, pixels(view))
         assertEquals(0, turns); assertEquals(0, menus)
     }
