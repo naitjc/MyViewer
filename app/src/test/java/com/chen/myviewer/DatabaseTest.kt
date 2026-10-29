@@ -41,4 +41,18 @@ class DatabaseTest {
         dao.putBook(dao.book("one")!!.copy(title = "新的标题"))
         assertEquals(456, dao.position("one")!!.textOffset)
     }
+    @Test fun cumulativeTimeIsIdempotentAndSurvivesHistoryAndBookUpdates() = runBlocking {
+        insert(); dao.putBook(Book("two", "漫画", "COMIC", "DIRECT", "content://book/two"))
+        val first = ReadingTimeRecord("session-one", "2026-10-29", "one", 1000)
+        dao.saveReadingTimes(listOf(first, first))
+        dao.saveReadingTimes(listOf(first.copy(durationMs = 500)))
+        assertEquals(1000, dao.observeReadingTotals("2026-10-29").first().totalMs)
+        dao.saveReadingTimes(listOf(first.copy(day = "2026-10-30", durationMs = 2000),
+            first.copy(sessionId = "another", durationMs = 4000),
+            ReadingTimeRecord("session-two", "2026-10-29", "two", 5000)))
+        assertEquals(ReadingTotals(10000, 12000), dao.observeReadingTotals("2026-10-29").first())
+        assertEquals(mapOf("one" to 7000L, "two" to 5000L), dao.observeBookReadingTimes().first().associate { it.bookId to it.totalMs })
+        dao.clearHistory(); dao.shelf("one", false); dao.putBook(dao.book("one")!!.copy(title = "改名后的书"))
+        assertEquals(12000, dao.observeReadingTotals("2026-10-29").first().totalMs)
+    }
 }

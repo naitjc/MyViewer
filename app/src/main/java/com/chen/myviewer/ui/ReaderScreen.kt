@@ -49,6 +49,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val token = session.position.sessionId
+    ReadingTimeEffect(vm, token)
     val automatic = remember(token) { AutoReadingState() }
     val pauseAutomatic: () -> Unit = { automatic.stop(); textView?.flush(); vm.flushPosition() }
     val close: () -> Unit = { pauseAutomatic(); vm.closeReader() }

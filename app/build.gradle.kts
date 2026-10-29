@@ -12,8 +12,8 @@ android {
         applicationId = "com.chen.myviewer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.1.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -24,7 +24,10 @@ android {
     kotlinOptions { jvmTarget = "17" }
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        unitTests.all { it.systemProperty("myviewer.outputDir", rootProject.file(".tooling/screenshots").absolutePath) }
+        unitTests.all {
+            it.systemProperty("myviewer.outputDir", rootProject.file(".tooling/screenshots").absolutePath)
+            it.systemProperty("myviewer.schemaDir", project.file("schemas").absolutePath)
+        }
     }
     packaging { resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*") }
 }

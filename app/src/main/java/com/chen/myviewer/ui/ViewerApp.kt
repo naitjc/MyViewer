@@ -45,6 +45,9 @@ import com.chen.myviewer.*
 import com.chen.myviewer.data.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import java.time.LocalDate
 
 private val Green = Color(0xFF315B48)
 private val LightColors = lightColorScheme(primary = Green, secondary = Color(0xFF63765C), primaryContainer = Color(0xFFDCE9DF), onPrimaryContainer = Color(0xFF173B28), secondaryContainer = Color(0xFFE0E8DA), onSecondaryContainer = Color(0xFF24362B), tertiaryContainer = Color(0xFFE7E6DB), onTertiaryContainer = Color(0xFF3E4433), background = Color(0xFFFAF9F6), surface = Color(0xFFFAF9F6), surfaceContainer = Color(0xFFEFF1E9), onSurface = Color(0xFF24332D))
@@ -127,7 +130,14 @@ fun ViewerApp(vm: MainViewModel) {
                         filter = shelfFilter, onFilter = { shelfFilter = it }, query = shelfQuery, onQuery = { shelfQuery = it },
                         columns = libraryColumns, state = shelfState, onTop = returnToTop,
                         open = openBook, manage = { managing = it }, import = { sourceDialog = true })
-                    1 -> History(library.filter { it.book.inHistory }, openBook, vm::clearHistory, { tab = 0 })
+                    1 -> {
+                        val today by produceState(LocalDate.now().toString()) {
+                            while (isActive) { delay(30000); value = LocalDate.now().toString() }
+                        }
+                        val totals by remember(today) { vm.readingTotals(today) }.collectAsStateWithLifecycle(ReadingTotals())
+                        val bookTimes by vm.bookReadingTimes.collectAsStateWithLifecycle()
+                        History(library.filter { it.book.inHistory }, openBook, vm::clearHistory, { tab = 0 }, totals, bookTimes)
+                    }
                     else -> SettingsScreen(vm, settings, libraryColumns, vm::setLibraryColumns, expandedSettings) { section ->
                         expandedSettings = if (section in expandedSettings) expandedSettings - section else expandedSettings + section
                     }

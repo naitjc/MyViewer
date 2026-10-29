@@ -1,6 +1,8 @@
 package com.chen.myviewer.data
 
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "books", indices = [Index("sourceUri", unique = true)])
@@ -54,6 +56,14 @@ data class Bookmark(
 @Entity(tableName = "folders")
 data class FolderSource(@PrimaryKey val uri: String, val name: String, val recursive: Boolean = true)
 
+@Entity(tableName = "reading_times", primaryKeys = ["sessionId", "day"],
+    foreignKeys = [ForeignKey(entity = Book::class, parentColumns = ["id"], childColumns = ["bookId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("bookId"), Index("day")])
+data class ReadingTimeRecord(val sessionId: String, val day: String, val bookId: String, val durationMs: Long)
+
+data class ReadingTotals(val todayMs: Long = 0, val totalMs: Long = 0)
+data class BookReadingTime(val bookId: String, val totalMs: Long)
+
 data class LibraryBook(
     @Embedded val book: Book,
     @Relation(parentColumn = "id", entityColumn = "bookId") val position: ReadingPosition?,
@@ -83,8 +93,32 @@ interface ViewerDao {
     @Query("SELECT * FROM folders ORDER BY name") fun folders(): Flow<List<FolderSource>>
     @Upsert suspend fun putFolder(folder: FolderSource)
     @Query("DELETE FROM folders WHERE uri=:uri") suspend fun deleteFolder(uri: String)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertTimeIfAbsent(record: ReadingTimeRecord)
+    @Query("UPDATE reading_times SET durationMs=MAX(durationMs, :total) WHERE sessionId=:session AND day=:day AND bookId=:book")
+    suspend fun keepMaximumTime(session: String, day: String, book: String, total: Long)
+    @Transaction suspend fun saveReadingTimes(records: List<ReadingTimeRecord>) {
+        records.filter { it.durationMs > 0 }.forEach { record ->
+            insertTimeIfAbsent(record.copy(durationMs = 0))
+            keepMaximumTime(record.sessionId, record.day, record.bookId, record.durationMs)
+        }
+    }
+    @Query("SELECT COALESCE(SUM(CASE WHEN day=:today THEN durationMs ELSE 0 END),0) AS todayMs, COALESCE(SUM(durationMs),0) AS totalMs FROM reading_times")
+    fun observeReadingTotals(today: String): Flow<ReadingTotals>
+    @Query("SELECT bookId, SUM(durationMs) AS totalMs FROM reading_times GROUP BY bookId")
+    fun observeBookReadingTimes(): Flow<List<BookReadingTime>>
 }
 
-@Database(entities = [Book::class, ReadingPosition::class, BookPreferences::class, Bookmark::class, FolderSource::class], version = 1, exportSchema = true)
-abstract class ViewerDatabase : RoomDatabase() { abstract fun dao(): ViewerDao }
+@Database(entities = [Book::class, ReadingPosition::class, BookPreferences::class, Bookmark::class, FolderSource::class, ReadingTimeRecord::class], version = 2, exportSchema = true)
+abstract class ViewerDatabase : RoomDatabase() {
+    abstract fun dao(): ViewerDao
+    companion object {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `reading_times` (`sessionId` TEXT NOT NULL, `day` TEXT NOT NULL, `bookId` TEXT NOT NULL, `durationMs` INTEGER NOT NULL, PRIMARY KEY(`sessionId`, `day`), FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reading_times_bookId` ON `reading_times` (`bookId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reading_times_day` ON `reading_times` (`day`)")
+            }
+        }
+    }
+}
 

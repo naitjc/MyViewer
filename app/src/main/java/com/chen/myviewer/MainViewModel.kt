@@ -37,6 +37,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val settings = app.settings.settings.stateIn(viewModelScope, SharingStarted.Eagerly, ReaderSettings())
     val librarySort = app.settings.librarySort.stateIn(viewModelScope, SharingStarted.Eagerly, LibrarySort.RECENT)
     val libraryColumns = app.settings.libraryColumns.stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+    val bookReadingTimes = repository.dao.observeBookReadingTimes().map { rows -> rows.associate { it.bookId to it.totalMs } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+    private val readingClock = ReadingTimeTracker(app.readingTime::record)
+    fun readingTotals(day: String) = repository.dao.observeReadingTotals(day)
+    fun readingVisibility(token: String, visible: Boolean) {
+        reader.value?.takeIf { it.position.sessionId == token }?.let { readingClock.visible(token, it.book.id, visible) }
+    }
     val importing = MutableStateFlow<ImportUi?>(null)
     val reader = MutableStateFlow<ReaderSession?>(null)
     val loading = MutableStateFlow<Book?>(null)
@@ -51,7 +58,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var latestComicPosition: ReadingPosition? = null
     private var lastComicPublication = 0L
 
-    init { viewModelScope.launch { for (position in saves) runCatching { repository.save(position) }.onFailure { notice.value = "阅读位置保存失败，请检查存储空间。" } } }
+    init {
+        viewModelScope.launch { for (position in saves) runCatching { repository.save(position) }.onFailure { notice.value = "阅读位置保存失败，请检查存储空间。" } }
+        viewModelScope.launch { app.readingTime.errors.collect { notice.value = "阅读时间保存失败，请检查存储空间。" } }
+    }
 
     fun selectedFiles(uris: List<Uri>, temporaryUris: Set<Uri> = emptySet()) = viewModelScope.launch {
         importing.value = ImportUi(copy = settings.value.copyOnImport, busy = true, message = "正在检查文件…")
@@ -81,6 +91,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun dismissImport() { if (importing.value?.busy != true) importing.value = null }
 
     fun open(book: Book) {
+        readingClock.stop()
         openJob?.cancel()
         val previousPosition = reader.value?.position
         val old = reader.value?.comic
@@ -159,6 +170,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun deleteBookmark(id: String) = viewModelScope.launch { repository.dao.deleteBookmark(id) }
     fun closeReader() {
+        readingClock.stop()
         val previous = reader.value
         val position = latestComicPosition?.takeIf { it.sessionId == previous?.position?.sessionId } ?: previous?.position
         position?.let { closeSave = viewModelScope.async { repository.save(it.copy(sequence = ++sequence)) } }
@@ -184,5 +196,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val book = reader.value?.book ?: return@launch
         repository.dao.encoding(book.id, value); open(book.copy(encoding = value))
     }
-    override fun onCleared() { reader.value?.comic?.close(); super.onCleared() }
+    override fun onCleared() { readingClock.stop(); reader.value?.comic?.close(); super.onCleared() }
 }
