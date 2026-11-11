@@ -89,7 +89,7 @@ internal fun Bookshelf(
                 LazyVerticalGrid(state = state, columns = GridCells.Fixed(columns.coerceIn(1, 6)), modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 88.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (columns >= 5) 10.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-                    val recent = shown.maxByOrNull { it.book.lastOpenedAt }?.takeIf { it.book.lastOpenedAt > 0 && term.isEmpty() }
+                    val recent = shown.filterNot { it.book.completed }.maxByOrNull { it.book.lastOpenedAt }?.takeIf { it.book.lastOpenedAt > 0 && term.isEmpty() }
                     if (recent != null) item(key = "continue-reading", span = { GridItemSpan(maxLineSpan) }) { ResumeBookCard(recent, { open(recent.book) }) }
                     items(shown, key = { it.book.id }) { row ->
                         Column(Modifier.combinedClickable(onClick = { open(row.book) }, onLongClick = { manage(row.book) })) {
@@ -116,7 +116,7 @@ internal fun ResumeBookCard(row: LibraryBook, open: () -> Unit, subtitle: String
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Outlined.AutoStories, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
-                Text("继续阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(if (row.book.completed) "再次阅读" else "继续阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.weight(1f)); Icon(Icons.Outlined.ArrowForward, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.primary)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {

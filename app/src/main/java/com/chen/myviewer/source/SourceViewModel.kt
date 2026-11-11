@@ -19,6 +19,7 @@ data class SourceBrowserState(
     val repositoryUrl: String = COMMUNITY_SOURCE_URL,
     val source: SourceEntry? = null,
     val query: String = "",
+    val language: String = "",
     val results: List<SourceManga> = emptyList(),
     val page: Int = 0,
     val hasNextPage: Boolean = false,
@@ -56,6 +57,7 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
         state.update { it.copy(source = entry, query = "", results = emptyList(), page = 0, detail = null, error = null) }
         search()
     }
+    fun language(value: String) { state.update { it.copy(language = value) } }
     fun query(value: String) { state.update { it.copy(query = value) } }
     fun search(more: Boolean = false) {
         val current = state.value

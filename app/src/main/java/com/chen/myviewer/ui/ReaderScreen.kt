@@ -49,6 +49,8 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val token = session.position.sessionId
+    val library by vm.library.collectAsStateWithLifecycle()
+    val book = library.firstOrNull { it.book.id == session.book.id }?.book ?: session.book
     ReadingTimeEffect(vm, token)
     val automatic = remember(token) { AutoReadingState() }
     val pauseAutomatic: () -> Unit = { automatic.stop(); textView?.flush(); vm.flushPosition() }
@@ -100,6 +102,10 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                     Column(Modifier.weight(1f)) {
                         Text(session.book.title, maxLines = 1, style = MaterialTheme.typography.titleMedium)
                         session.chapter?.let { Text(it.label, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
+                    }
+                    IconButton(onClick = { vm.setCompleted(book, !book.completed) }) {
+                        Icon(if (book.completed) Icons.Outlined.CheckCircle else Icons.Outlined.CheckCircleOutline,
+                            if (book.completed) "取消已读完标记" else "标记已读完")
                     }
                     IconButton(onClick = { sheet = "settings" }) { Icon(Icons.Outlined.Tune, "阅读设置") }
                 }

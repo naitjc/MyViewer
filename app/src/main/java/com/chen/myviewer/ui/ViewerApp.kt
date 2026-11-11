@@ -162,6 +162,9 @@ fun ViewerApp(vm: MainViewModel) {
         } }, confirmButton = { TextButton(onClick = { sourceDialog = false }) { Text("关闭") } })
         importing?.let { ImportDialog(it, vm) }
         if (managing != null) AlertDialog(onDismissRequest = { managing = null }, title = { Text(managing!!.title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextButton(onClick = { vm.setCompleted(managing!!, !managing!!.completed); managing = null }) {
+                Text(if (managing!!.completed) "取消已读完标记" else "标记已读完")
+            }
             Text(if (managing!!.storage == "ONLINE") "在线漫画" else "${if (managing!!.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (managing!!.storage == "COPY") "应用内副本" else "直接读取"}")
             Text("移出书架后仍保留文件、进度、书签和历史。", style = MaterialTheme.typography.bodySmall)
             if (managing!!.storage != "ONLINE") TextButton(onClick = { relinking = managing; managing = null; relink.launch(arrayOf("*/*")) }) { Text("重新定位原文件，改为直接读取") }
@@ -207,7 +210,12 @@ internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
         }
     }
 }
-internal fun progressLabel(row: LibraryBook): String = if (row.book.lastOpenedAt == 0L) "尚未阅读" else if (row.book.kind == "COMIC") "第 ${(row.position?.imageIndex ?: 0) + 1} 页" else "已读 ${((row.position?.progress ?: 0f) * 100).toInt()}%"
+internal fun progressLabel(row: LibraryBook): String = when {
+    row.book.completed -> "已读完"
+    row.book.lastOpenedAt == 0L -> "尚未阅读"
+    row.book.kind == "COMIC" -> "第 ${(row.position?.imageIndex ?: 0) + 1} 页"
+    else -> "已读 ${((row.position?.progress ?: 0f) * 100).toInt()}%"
+}
 
 @Composable
 private fun ImportDialog(ui: ImportUi, vm: MainViewModel) {

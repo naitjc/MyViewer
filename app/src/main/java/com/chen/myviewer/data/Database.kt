@@ -20,6 +20,7 @@ data class Book(
     val onShelf: Boolean = true,
     val inHistory: Boolean = false,
     val encoding: String = "AUTO",
+    @ColumnInfo(defaultValue = "0") val completed: Boolean = false,
 )
 
 @Entity(tableName = "positions", foreignKeys = [ForeignKey(entity = Book::class, parentColumns = ["id"], childColumns = ["bookId"], onDelete = ForeignKey.CASCADE)])
@@ -38,7 +39,14 @@ data class ReadingPosition(
 
 @Entity(tableName = "chapter_positions", primaryKeys = ["bookId", "chapterKey"],
     foreignKeys = [ForeignKey(entity = Book::class, parentColumns = ["id"], childColumns = ["bookId"], onDelete = ForeignKey.CASCADE)])
-data class ChapterPosition(val bookId: String, val chapterKey: String, val imageIndex: Int, val imageRatio: Float, val progress: Float)
+data class ChapterPosition(
+    val bookId: String,
+    val chapterKey: String,
+    val imageIndex: Int,
+    val imageRatio: Float,
+    val progress: Float,
+    val completed: Boolean? = null,
+)
 
 @Entity(tableName = "book_preferences", foreignKeys = [ForeignKey(entity = Book::class, parentColumns = ["id"], childColumns = ["bookId"], onDelete = ForeignKey.CASCADE)])
 data class BookPreferences(
@@ -85,6 +93,8 @@ interface ViewerDao {
     suspend fun updateOnlineTitle(id: String, title: String, onShelf: Boolean)
     @Query("UPDATE books SET lastOpenedAt=:now, inHistory=1 WHERE id=:id") suspend fun opened(id: String, now: Long)
     @Query("UPDATE books SET onShelf=:visible WHERE id=:id") suspend fun shelf(id: String, visible: Boolean)
+    @Query("UPDATE books SET completed=:completed WHERE id=:id")
+    suspend fun setCompleted(id: String, completed: Boolean)
     @Query("UPDATE books SET inHistory=0") suspend fun clearHistory()
     @Query("UPDATE books SET sourceUri=:uri, storage='DIRECT', localPath=NULL WHERE id=:id") suspend fun relink(id: String, uri: String)
     @Query("UPDATE books SET encoding=:encoding WHERE id=:id") suspend fun encoding(id: String, encoding: String)
@@ -96,8 +106,16 @@ interface ViewerDao {
     suspend fun chapterPosition(bookId: String, chapterKey: String): ChapterPosition?
     @Query("SELECT * FROM chapter_positions WHERE bookId=:bookId")
     fun chapterPositions(bookId: String): Flow<List<ChapterPosition>>
-    @Query("INSERT OR REPLACE INTO chapter_positions (bookId,chapterKey,imageIndex,imageRatio,progress) SELECT bookId,chapterKey,imageIndex,imageRatio,progress FROM positions WHERE bookId=:bookId AND sessionId=:sessionId AND sequence=:sequence AND chapterKey<>''")
+    @Query("INSERT OR REPLACE INTO chapter_positions (bookId,chapterKey,imageIndex,imageRatio,progress,completed) SELECT bookId,chapterKey,imageIndex,imageRatio,progress,(SELECT completed FROM chapter_positions AS saved WHERE saved.bookId=positions.bookId AND saved.chapterKey=positions.chapterKey) FROM positions WHERE bookId=:bookId AND sessionId=:sessionId AND sequence=:sequence AND chapterKey<>''")
     suspend fun snapshotChapter(bookId: String, sessionId: String, sequence: Long)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertChapterIfAbsent(position: ChapterPosition)
+    @Query("UPDATE chapter_positions SET completed=:completed WHERE bookId=:bookId AND chapterKey=:chapterKey")
+    suspend fun updateChapterCompleted(bookId: String, chapterKey: String, completed: Boolean)
+    @Transaction suspend fun setChapterCompleted(bookId: String, chapterKey: String, completed: Boolean) {
+        insertChapterIfAbsent(ChapterPosition(bookId, chapterKey, 0, 0f, 0f, completed))
+        updateChapterCompleted(bookId, chapterKey, completed)
+    }
     @Transaction suspend fun saveReadingPosition(position: ReadingPosition) {
         savePosition(position.bookId, position.sessionId, position.textOffset, position.imageIndex, position.imageEntry,
             position.imageRatio, position.progress, position.sequence, System.currentTimeMillis())
@@ -126,10 +144,16 @@ interface ViewerDao {
     fun observeBookReadingTimes(): Flow<List<BookReadingTime>>
 }
 
-@Database(entities = [Book::class, ReadingPosition::class, ChapterPosition::class, BookPreferences::class, Bookmark::class, FolderSource::class, ReadingTimeRecord::class], version = 3, exportSchema = true)
+@Database(entities = [Book::class, ReadingPosition::class, ChapterPosition::class, BookPreferences::class, Bookmark::class, FolderSource::class, ReadingTimeRecord::class], version = 4, exportSchema = true)
 abstract class ViewerDatabase : RoomDatabase() {
     abstract fun dao(): ViewerDao
     companion object {
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE books ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE chapter_positions ADD COLUMN completed INTEGER")
+            }
+        }
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE positions ADD COLUMN chapterKey TEXT NOT NULL DEFAULT ''")

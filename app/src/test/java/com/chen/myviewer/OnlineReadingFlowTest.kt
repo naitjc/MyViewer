@@ -59,6 +59,13 @@ class OnlineReadingFlowTest {
         waitForUi { compose.onAllNodesWithText("开始阅读").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("章节 · 2").assertExists()
         capture("online-offline-chapters")
+        compose.onNodeWithText("标记已读完").performClick()
+        waitForUi { vm.library.value.firstOrNull { it.book.id == title.book.id }?.book?.completed == true }
+        compose.onNodeWithText("取消已读完标记").performClick()
+        compose.onNodeWithContentDescription("章节操作：${chapters.last().label}").performClick()
+        compose.onAllNodesWithText("标记已读完").onLast().performClick()
+        waitForUi { runBlocking { vm.repository.dao.chapterPosition(title.book.id, "one") }?.completed == true }
+        capture("online-chapter-completed")
         compose.onNodeWithText("开始阅读").performClick()
         waitForUi { vm.reader.value?.chapter?.key == "one" && vm.reader.value?.comic?.cachedPage(0) != null }
         compose.runOnIdle { vm.seekComic(1); vm.flushPosition() }
@@ -78,6 +85,7 @@ class OnlineReadingFlowTest {
         assertEquals(1, vm.reader.value!!.position.imageIndex)
         assertEquals(2, runBlocking { vm.repository.dao.chapterPosition(title.book.id, "two") }!!.imageIndex)
         assertNull(vm.error.value)
+        assertEquals(true, runBlocking { vm.repository.dao.chapterPosition(title.book.id, "one") }!!.completed)
         compose.runOnIdle { vm.closeReader() }
         compose.onNodeWithText("书库").performClick()
         waitForUi { compose.onAllNodesWithText("在线漫画", substring = true).fetchSemanticsNodes().isNotEmpty() }
@@ -87,19 +95,36 @@ class OnlineReadingFlowTest {
         val app = sources.getApplication<ViewerApplication>()
         val guya = SourceEntry("en.guya", "Guya", 2, listOf("en"), "https://example.test/guya.aix", "https://guya.cubari.moe", 0)
         val copy = SourceEntry("zh.copymanga", "拷贝漫画", 24, listOf("zh"), "https://example.test/copy.aix", "https://www.copy5000.com", 1)
+        val japanese = guya.copy(id = "ja.test", name = "日文源", languages = listOf("ja"))
+        val portuguese = guya.copy(id = "pt.test", name = "葡文源", languages = listOf("pt-BR"))
+        val traditional = copy.copy(id = "zh.traditional", name = "繁体源", languages = listOf("zh-Hant"))
         val installed = app.sources.installPackage(guya, javaClass.getResourceAsStream("/aidoku/en.guya-v2.aix")!!.use { it.readBytes() })
-        compose.runOnIdle { sources.state.value = SourceBrowserState(catalog = listOf(guya, copy), installed = listOf(installed)) }
+        compose.runOnIdle { sources.state.value = SourceBrowserState(catalog = listOf(guya, copy, japanese, portuguese, traditional), installed = listOf(installed)) }
         compose.onNodeWithText("发现").performClick()
         waitForUi { compose.onAllNodesWithText("Guya").fetchSemanticsNodes().isNotEmpty() }
         capture("online-source-catalog")
         compose.onNodeWithText("中文").performClick()
         compose.onNodeWithText("拷贝漫画").assertExists()
         compose.onNodeWithText("Guya").assertDoesNotExist()
+        compose.onNodeWithText("繁体源").assertExists()
+        compose.onNodeWithText(sourceLanguageLabel("en")).performClick()
+        compose.onNodeWithText("Guya").assertExists()
+        compose.onNodeWithText("拷贝漫画").assertDoesNotExist()
+        compose.onNodeWithText(sourceLanguageLabel("ja")).performClick()
+        compose.onNodeWithText("日文源").assertExists()
+        compose.onNodeWithText("更多语言").performScrollTo().performClick()
+        compose.onNodeWithText(sourceLanguageLabel("pt")).performClick()
+        compose.onNodeWithText("葡文源").assertExists()
+        compose.onNodeWithText("Guya").assertDoesNotExist()
+        capture("source-languages-portuguese")
         compose.runOnIdle { sources.state.value = sources.state.value.copy(source = guya) }
         compose.onNodeWithContentDescription("漫画源设置").performClick()
         waitForUi { compose.onAllNodesWithText("站点地址", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         capture("online-source-settings")
         compose.onNodeWithText("完成").performClick()
+        compose.runOnIdle { sources.back() }
+        compose.onNodeWithText("葡文源").assertExists()
+        assertEquals("pt", sources.state.value.language)
     }
     private fun waitForUi(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 20_000

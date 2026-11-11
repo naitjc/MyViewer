@@ -4,6 +4,8 @@ package com.chen.myviewer.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -79,7 +81,14 @@ fun SourceScreen(vm: SourceViewModel, reader: MainViewModel) {
 @Composable
 private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, repository: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
-    var chineseOnly by rememberSaveable { mutableStateOf(false) }
+    var languageMenu by remember { mutableStateOf(false) }
+    val installed = state.installed.associateBy { it.id }
+    val available = (state.installed.map { it.entry } + state.catalog).groupBy { it.id }
+        .map { (_, versions) -> versions.maxBy { it.version } }
+    val languages = (available.flatMap { it.languages }.map(::sourceLanguageGroup) + state.language)
+        .filter { it.isNotBlank() }.distinct().sortedBy(::sourceLanguageLabel)
+    val commonLanguages = listOf("zh", "en", "ja", "ko")
+    val otherLanguages = languages.filterNot { it in commonLanguages }
     LaunchedEffect(state.busy) { if (state.catalog.isEmpty() && state.busy == null && state.error == null) vm.loadCatalog() }
     Column {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -88,17 +97,34 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
             IconButton(onClick = repository) { Icon(Icons.Outlined.Settings, "管理源仓库") }
         }
         OutlinedTextField(query, { query = it }, label = { Text("搜索漫画源") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), leadingIcon = { Icon(Icons.Outlined.Search, null) })
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(!chineseOnly, { chineseOnly = false }, label = { Text("全部语言") })
-            FilterChip(chineseOnly, { chineseOnly = true }, label = { Text("中文") })
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(state.language.isEmpty(), { vm.language("") }, label = { Text("全部语言") })
+            commonLanguages.filter { it == "zh" || it in languages }.forEach { language ->
+                FilterChip(state.language == language, { vm.language(language) }, label = { Text(sourceLanguageLabel(language)) })
+            }
+            if (otherLanguages.isNotEmpty()) Box {
+                val selected = state.language in otherLanguages
+                FilterChip(selected, { languageMenu = true },
+                    label = { Text(if (selected) sourceLanguageLabel(state.language) else "更多语言") },
+                    trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null) })
+                DropdownMenu(languageMenu, { languageMenu = false }, modifier = Modifier.heightIn(max = 360.dp)) {
+                    otherLanguages.forEach { language ->
+                        DropdownMenuItem(text = { Text(sourceLanguageLabel(language)) },
+                            trailingIcon = { if (state.language == language) Icon(Icons.Outlined.Check, null) },
+                            onClick = { vm.language(language); languageMenu = false })
+                    }
+                }
+            }
         }
-        val installed = state.installed.associateBy { it.id }
-        val entries = (state.installed.map { it.entry } + state.catalog).groupBy { it.id }.map { (_, versions) -> versions.maxBy { it.version } }
-            .filter { (!chineseOnly || it.languages.any { language -> language.startsWith("zh") }) && (query.isBlank() || "${it.name} ${it.id}".contains(query, true)) }
-            .sortedWith(compareByDescending<SourceEntry> { it.id in installed }.thenBy { it.name })
+        val entries = available.filter { entry ->
+            (state.language.isEmpty() || entry.languages.any { sourceLanguageGroup(it) == state.language }) &&
+                (query.isBlank() || "${entry.name} ${entry.id}".contains(query, true))
+        }.sortedWith(compareByDescending<SourceEntry> { it.id in installed }.thenBy { it.name })
         if (entries.isEmpty() && state.busy == null) {
-            EmptyState("还没有可用的漫画源", "加载仓库后选择漫画源进行安装。", Icons.Outlined.Public) {
+            if (available.isEmpty()) EmptyState("还没有可用的漫画源", "加载仓库后选择漫画源进行安装。", Icons.Outlined.Public) {
                 Button(onClick = { vm.loadCatalog(true) }) { Text("重新加载") }
+            } else EmptyState("没有匹配的漫画源", "可以选择其他语言或调整源名称。", Icons.Outlined.SearchOff) {
+                TextButton(onClick = { query = ""; vm.language("") }) { Text("清除筛选") }
             }
         } else LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             items(entries, key = { it.id }) { entry ->
@@ -149,6 +175,8 @@ private fun SourceSearch(vm: SourceViewModel, state: SourceBrowserState) {
 @Composable
 private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: SourceBrowserState) {
     val title = state.detail!!
+    val library by reader.library.collectAsStateWithLifecycle()
+    val book = library.firstOrNull { it.book.id == title.book.id }?.book ?: title.book
     val positions by remember(title.book.id) { reader.repository.dao.chapterPositions(title.book.id) }.collectAsStateWithLifecycle(emptyList())
     val last by produceState<com.chen.myviewer.data.ReadingPosition?>(null, title.book.id) { value = reader.repository.dao.position(title.book.id) }
     val chapters = title.manga.chapters.orEmpty()
@@ -163,7 +191,10 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                     Text(title.manga.title, style = MaterialTheme.typography.titleLarge)
                     Text(title.manga.authors.joinToString(" / "), style = MaterialTheme.typography.bodyMedium)
                     Text(title.sourceId, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                    FilledTonalButton(onClick = vm::addToShelf, enabled = !title.book.onShelf && state.busy == null) { Text(if (title.book.onShelf) "已加入书架" else "加入书架") }
+                    FilledTonalButton(onClick = vm::addToShelf, enabled = !book.onShelf && state.busy == null) { Text(if (book.onShelf) "已加入书架" else "加入书架") }
+                    TextButton(onClick = { reader.setCompleted(book, !book.completed) }) {
+                        Text(if (book.completed) "取消已读完标记" else "标记已读完")
+                    }
                 }
             }
         }
@@ -177,13 +208,29 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
         if (chapters.isEmpty()) item { TextButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Text("刷新章节列表") } }
         items(chapters, key = { it.key }) { chapter ->
             val saved = progress[chapter.key]
+            val completed = saved?.completed ?: ((saved?.progress ?: 0f) >= .999f)
+            var chapterMenu by remember { mutableStateOf(false) }
             val downloaded = chapter.key in state.downloaded
             Row(Modifier.fillMaxWidth().clickable(enabled = !chapter.locked && state.busy == null) { reader.open(title.book, title, chapter) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(chapter.label, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     val status = listOfNotNull(if (chapter.locked) "已锁定" else null, if (downloaded) "已下载" else null,
-                        saved?.let { if (it.progress >= .999f) "已读" else "已读 ${(it.progress * 100).toInt()}%" }).joinToString(" · ")
+                        when {
+                            completed -> "已读完"
+                            saved?.completed == false -> "未读完"
+                            saved != null -> "已读 ${(saved.progress * 100).toInt()}%"
+                            else -> null
+                        }).joinToString(" · ")
                     if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+                Box {
+                    IconButton(onClick = { chapterMenu = true }) { Icon(Icons.Outlined.MoreVert, "章节操作：${chapter.label}") }
+                    DropdownMenu(chapterMenu, { chapterMenu = false }) {
+                        DropdownMenuItem(text = { Text(if (completed) "标记为未读完" else "标记已读完") }, onClick = {
+                            reader.setChapterCompleted(book, chapter.key, !completed)
+                            chapterMenu = false
+                        })
+                    }
                 }
                 if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = state.downloadStatus == null) { Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载") }
                 else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked && state.downloadStatus == null) { Icon(Icons.Outlined.Download, "下载 ${chapter.label}") }

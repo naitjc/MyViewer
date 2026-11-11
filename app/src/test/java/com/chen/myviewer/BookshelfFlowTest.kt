@@ -151,6 +151,33 @@ class BookshelfFlowTest {
         assertEquals(6, vm.libraryColumns.value)
     }
 
+    @Test fun completedBooksCanBeMarkedFromShelfAndUnmarkedWhileReading() {
+        compose.onNodeWithText("书库").performClick()
+        val vm = ViewModelProvider(compose.activity)[MainViewModel::class.java]
+        val file = File(compose.activity.cacheDir, "completed-story.txt").apply { writeText("第1章\n完成标记测试。\n".repeat(100)) }
+        runBlocking {
+            vm.repository.dao.putBook(Book("completion-local", "完读测试", "TEXT", "DIRECT", Uri.fromFile(file).toString(), lastOpenedAt = 1))
+        }
+        waitForUi { compose.onAllNodesWithText("完读测试").fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodesWithText("完读测试").onLast().performTouchInput { longClick(center) }
+        compose.onNodeWithText("标记已读完").performClick()
+        waitForUi { vm.library.value.single().book.completed }
+        compose.onNodeWithText("已读完").assertExists()
+        compose.onNodeWithText("继续阅读").assertDoesNotExist()
+        capture("bookshelf-completed")
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithText("已读完").assertExists()
+        compose.onAllNodesWithText("完读测试").onLast().performClick()
+        val current = ViewModelProvider(compose.activity)[MainViewModel::class.java]
+        waitForUi { current.reader.value?.text != null }
+        compose.onRoot().performTouchInput { click(center) }
+        compose.onNodeWithContentDescription("取消已读完标记").performClick()
+        waitForUi { !current.library.value.single().book.completed }
+        compose.runOnIdle { current.closeReader() }
+        compose.onNodeWithText("已读完").assertDoesNotExist()
+        compose.onNodeWithText("继续阅读").assertExists()
+    }
+
     private fun seedShelf(vm: MainViewModel, count: Int) = runBlocking {
         for (index in 1..count) vm.repository.dao.putBook(Book("shelf-$index", "书 ${index.toString().padStart(3, '0')}", "TEXT", "DIRECT", "file:///shelf/$index.txt", importedAt = index.toLong()))
     }

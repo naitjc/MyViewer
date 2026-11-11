@@ -209,6 +209,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setLibrarySort(value: LibrarySort) = viewModelScope.launch { app.settings.setLibrarySort(value) }
     fun setLibraryColumns(value: Int) = viewModelScope.launch { app.settings.setLibraryColumns(value) }
     fun hide(book: Book) = viewModelScope.launch { repository.dao.shelf(book.id, false) }
+    fun setCompleted(book: Book, completed: Boolean) = viewModelScope.launch {
+        try {
+            repository.dao.setCompleted(book.id, completed)
+            notice.value = if (completed) "已标记已读完" else "已取消已读完标记"
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { notice.value = "阅读状态保存失败，请重试。" }
+    }
+    fun setChapterCompleted(book: Book, chapterKey: String, completed: Boolean) = viewModelScope.launch {
+        try {
+            repository.dao.setChapterCompleted(book.id, chapterKey, completed)
+            notice.value = if (completed) "章节已标记已读完" else "章节已标记未读完"
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { notice.value = "章节状态保存失败，请重试。" }
+    }
     fun clearHistory() = viewModelScope.launch { repository.dao.clearHistory() }
     fun removeFolder(uri: String) = viewModelScope.launch { repository.dao.deleteFolder(uri) }
     fun clearComicCache() = viewModelScope.launch {
