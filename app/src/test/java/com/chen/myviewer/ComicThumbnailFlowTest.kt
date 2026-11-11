@@ -68,7 +68,7 @@ class ComicThumbnailFlowTest {
                 compose.runOnIdle { model.open(book) }
                 waitForUi { model.reader.value?.comic != null || model.error.value != null }
                 assertNull(model.error.value)
-                assertEquals(20, model.reader.value!!.comic!!.images.size)
+                assertEquals(20, model.reader.value!!.comic!!.imageNames.size)
                 assertEquals(9, model.reader.value!!.position.imageIndex)
                 assertEquals("010.png", model.reader.value!!.position.imageEntry)
                 assertEquals(.25f, model.reader.value!!.position.imageRatio, 0f)
@@ -86,7 +86,7 @@ class ComicThumbnailFlowTest {
                 waitForUi { runBlocking { model.repository.dao.position(book.id)?.imageEntry == "018.png" } }
                 compose.runOnIdle { model.open(book) }
                 waitForUi { model.reader.value?.comic != null }
-                assertEquals(20, model.reader.value!!.comic!!.images.size)
+                assertEquals(20, model.reader.value!!.comic!!.imageNames.size)
                 assertEquals(17, model.reader.value!!.position.imageIndex)
                 assertEquals("SCROLL", model.reader.value!!.preferences.mode)
                 compose.runOnIdle { model.closeReader() }

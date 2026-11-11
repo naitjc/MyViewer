@@ -6,6 +6,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.chen.myviewer.data.*
 import com.chen.myviewer.reader.comic.ComicArchive
+import com.chen.myviewer.reader.comic.ComicDocument
+import com.chen.myviewer.source.OnlineComicDocument
+import com.chen.myviewer.source.OnlineTitle
+import com.chen.myviewer.source.SourceChapter
 import com.chen.myviewer.reader.text.TextDocument
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -24,9 +28,11 @@ data class ReaderSession(
     val position: ReadingPosition,
     val preferences: BookPreferences,
     val text: TextDocument? = null,
-    val comic: ComicArchive? = null,
+    val comic: ComicDocument? = null,
     val jump: Int = 0,
     val jumpOffset: Int = 0,
+    val onlineTitle: OnlineTitle? = null,
+    val chapter: SourceChapter? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -90,33 +96,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun dismissImport() { if (importing.value?.busy != true) importing.value = null }
 
-    fun open(book: Book) {
+    fun open(book: Book, online: OnlineTitle? = null, chapter: SourceChapter? = null) {
+        if (book.storage == "ONLINE" && online == null) {
+            viewModelScope.launch {
+                try {
+                    val title = app.sources.title(book)
+                    val last = repository.dao.position(book.id)?.chapterKey
+                    val selected = title.manga.chapters?.firstOrNull { it.key == last }
+                        ?: title.manga.chapters?.lastOrNull() ?: error("请在漫画详情中刷新章节列表。")
+                    open(book, title, selected)
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error.value = e.message ?: "在线漫画暂时无法打开" }
+            }
+            return
+        }
         readingClock.stop()
         openJob?.cancel()
         val previousPosition = reader.value?.position
         val old = reader.value?.comic
         reader.value = null; error.value = null; failedBook.value = null; loading.value = book
         openJob = viewModelScope.launch {
-            var archive: ComicArchive? = null
+            var archive: ComicDocument? = null
             try {
                 closeSave?.await()
                 previousPosition?.let { repository.save(it.copy(sequence = it.sequence + 1)) }
                 withContext(Dispatchers.IO) { old?.close() }
                 val text = if (book.kind == "TEXT") repository.loadText(book) else null
-                archive = if (book.kind == "COMIC") repository.loadComic(book) else null
+                archive = if (online != null && chapter != null) {
+                    OnlineComicDocument(app.sources, online, chapter, app.sources.chapterPages(online, chapter))
+                } else if (book.kind == "COMIC") repository.loadComic(book) else null
                 val prefs = repository.dao.preferences(book.id) ?: withContext(Dispatchers.IO) {
                     BookPreferences(book.id, archive?.suggestMode() ?: "PAGE", archive?.direction ?: "LTR")
                 }.also { repository.dao.putPreferences(it) }
                 var position = repository.startSession(book)
+                if (chapter != null) {
+                    val saved = repository.dao.chapterPosition(book.id, chapter.key)
+                    position = position.copy(chapterKey = chapter.key, imageIndex = saved?.imageIndex ?: 0,
+                        imageEntry = "", imageRatio = saved?.imageRatio ?: 0f, progress = saved?.progress ?: 0f)
+                    repository.dao.putPosition(position)
+                }
                 if (archive != null) {
                     val index = archive.restoreIndex(position.imageEntry, position.imageIndex)
-                    position = position.copy(imageIndex = index, imageEntry = archive.images[index].name,
-                        progress = (index + if (prefs.mode == "PAGE") 1f else position.imageRatio) / archive.images.size)
+                    position = position.copy(imageIndex = index, imageEntry = archive.imageNames[index],
+                        progress = (index + if (prefs.mode == "PAGE") 1f else position.imageRatio) / archive.imageNames.size)
                 }
                 if (text != null) position = position.copy(textOffset = position.textOffset.coerceIn(0, (text.text.length - 1).coerceAtLeast(0)))
                 sequence = 0L
                 latestComicPosition = null; lastComicPublication = 0L
-                reader.value = ReaderSession(book, position, prefs, text, archive)
+                reader.value = ReaderSession(book, position, prefs, text, archive, onlineTitle = online, chapter = chapter)
             } catch (e: CancellationException) { withContext(NonCancellable + Dispatchers.IO) { archive?.close() }; throw e }
             catch (e: Exception) { withContext(Dispatchers.IO) { archive?.close() }; error.value = e.message ?: "书籍暂时无法打开"; failedBook.value = book }
             finally { if (loading.value?.id == book.id) loading.value = null }
@@ -130,9 +157,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun comicPosition(index: Int, ratio: Float = 0f, force: Boolean = true) {
         val session = reader.value ?: return; val archive = session.comic ?: return
-        val safe = index.coerceIn(0, archive.images.lastIndex)
-        val progress = if (session.preferences.mode == "PAGE") (safe + 1f) / archive.images.size else (safe + ratio.coerceIn(0f, 1f)) / archive.images.size
-        val position = session.position.copy(imageIndex = safe, imageEntry = archive.images[safe].name, imageRatio = ratio.coerceIn(0f, 1f), progress = progress, sequence = ++sequence)
+        val safe = index.coerceIn(0, archive.imageNames.lastIndex)
+        val progress = if (session.preferences.mode == "PAGE") (safe + 1f) / archive.imageNames.size else (safe + ratio.coerceIn(0f, 1f)) / archive.imageNames.size
+        val position = session.position.copy(imageIndex = safe, imageEntry = archive.imageNames[safe], imageRatio = ratio.coerceIn(0f, 1f), progress = progress, sequence = ++sequence)
         latestComicPosition = position
         val now = android.os.SystemClock.uptimeMillis()
         if (force || safe != session.position.imageIndex || now - lastComicPublication >= 200) {
@@ -186,11 +213,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun removeFolder(uri: String) = viewModelScope.launch { repository.dao.deleteFolder(uri) }
     fun clearComicCache() = viewModelScope.launch {
         if (reader.value != null) return@launch
-        withContext(Dispatchers.IO) { java.io.File(app.cacheDir, "comic").deleteRecursively() }
+        withContext(Dispatchers.IO) {
+            java.io.File(app.cacheDir, "comic").deleteRecursively()
+            java.io.File(app.cacheDir, "online").deleteRecursively()
+        }
         notice.value = "漫画缓存已清理，书籍、进度和书签已保留"
     }
     fun relink(book: Book, uri: Uri) = viewModelScope.launch {
-        runCatching { repository.dao.relink(book.id, uri.toString()); repository.dao.book(book.id)?.let(::open) }.onFailure { error.value = it.message }
+        runCatching { repository.dao.relink(book.id, uri.toString()); repository.dao.book(book.id)?.let { open(it) } }.onFailure { error.value = it.message }
     }
     fun encoding(value: String) = viewModelScope.launch {
         val book = reader.value?.book ?: return@launch

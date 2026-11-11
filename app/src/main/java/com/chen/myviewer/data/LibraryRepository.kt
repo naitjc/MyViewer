@@ -114,6 +114,6 @@ class LibraryRepository(private val context: Context, val dao: ViewerDao) {
         val state = (dao.position(book.id) ?: ReadingPosition(book.id)).copy(sessionId = UUID.randomUUID().toString(), sequence = 0)
         dao.putPosition(state); dao.opened(book.id, System.currentTimeMillis()); state
     }
-    suspend fun save(position: ReadingPosition) { dao.savePosition(position.bookId, position.sessionId, position.textOffset, position.imageIndex, position.imageEntry, position.imageRatio, position.progress.coerceIn(0f, 1f), position.sequence, System.currentTimeMillis()) }
+    suspend fun save(position: ReadingPosition) { dao.saveReadingPosition(position.copy(progress = position.progress.coerceIn(0f, 1f))) }
     companion object { fun supported(name: String) = name.endsWith(".txt", true) || name.endsWith(".zip", true) }
 }

@@ -102,7 +102,7 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
                 Icon(Icons.Outlined.AutoStories, null, Modifier.size(25.dp), tint = MaterialTheme.colorScheme.primary)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("MYVIEWER", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                    Text("本地阅读 · TXT 小说与 ZIP 漫画", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("TXT 小说 · ZIP 与在线漫画", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }

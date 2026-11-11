@@ -41,7 +41,7 @@ class ReadingTimeMigrationTest {
             old.execSQL("INSERT INTO folders (uri,name,recursive) VALUES ('content://folder','旧文件夹',1)")
             old.version = 1
         }
-        fun open() = Room.databaseBuilder(context, ViewerDatabase::class.java, name).addMigrations(ViewerDatabase.MIGRATION_1_2).allowMainThreadQueries().build()
+        fun open() = Room.databaseBuilder(context, ViewerDatabase::class.java, name).addMigrations(ViewerDatabase.MIGRATION_1_2, ViewerDatabase.MIGRATION_2_3).allowMainThreadQueries().build()
         val upgraded = open()
         try {
             val db = upgraded

@@ -123,7 +123,7 @@ internal fun ResumeBookCard(row: LibraryBook, open: () -> Unit, subtitle: String
                 BookCover(row.book, Modifier.width(64.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text(row.book.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("${if (row.book.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${progressLabel(row)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .75f))
+                    Text("${if (row.book.kind == "TEXT") "TXT 小说" else if (row.book.storage == "ONLINE") "在线漫画" else "ZIP 漫画"} · ${progressLabel(row)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .75f))
                     LinearProgressIndicator(progress = { (row.position?.progress ?: 0f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.primary.copy(alpha = .12f))
                     subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .65f)) }
                 }

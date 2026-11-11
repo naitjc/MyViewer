@@ -38,21 +38,22 @@ object NaturalOrder : Comparator<String> {
 data class ComicImage(val name: String, val entry: ZipArchiveEntry)
 data class ImageSize(val width: Int, val height: Int)
 
-class ComicArchive private constructor(private val zip: ZipFile, private val directory: File) : Closeable {
+class ComicArchive private constructor(private val zip: ZipFile, private val directory: File) : ComicDocument {
     private val entrySizes = ConcurrentHashMap<ZipArchiveEntry, ImageSize>()
     private val imageIndex = ComicImageIndex(zip.entries.asSequence().filter {
         !it.isDirectory && !it.name.split('/').any { part -> part.startsWith('.') || part == "__MACOSX" } &&
             it.name.substringAfterLast('.').lowercase() in setOf("jpg", "jpeg", "png", "webp") && zip.canReadEntryData(it)
     }.map { ComicImage(it.name, it) }.toList()) { image -> runCatching { readSize(image) }.getOrNull() }
     val images: List<ComicImage> = imageIndex.images
-    val direction: String = readDirection()
+    override val imageNames: List<String> = images.map { it.name }
+    override val direction: String = readDirection()
     private val lock = Any()
     private val previews = object : LruCache<Int, ComicPage>(16 * 1024 * 1024) {
         override fun sizeOf(key: Int, value: ComicPage) = value.preview.allocationByteCount
     }
     @Volatile private var closed = false
 
-    fun imageFile(index: Int): File = synchronized(lock) {
+    override fun imageFile(index: Int): File = synchronized(lock) {
         check(!closed) { "漫画已经关闭，请重新打开。" }
         val image = images[index.coerceIn(0, images.lastIndex)]
         val key = digest("${image.name}:${image.entry.crc}:${image.entry.size}")
@@ -86,22 +87,22 @@ class ComicArchive private constructor(private val zip: ZipFile, private val dir
         require(options.outWidth > 0 && options.outHeight > 0) { "图片无法解码。" }
         ImageSize(options.outWidth, options.outHeight).also { entrySizes[image.entry] = it }
     }
-    fun size(index: Int): ImageSize = entrySizes[images[index].entry] ?: synchronized(lock) {
+    override fun size(index: Int): ImageSize = entrySizes[images[index].entry] ?: synchronized(lock) {
         check(!closed) { "漫画已经关闭，请重新打开。" }
         // Read only the image header, without extracting the entire ZIP entry.
         readSize(images[index])
     }
-    fun cachedSize(index: Int): ImageSize? = entrySizes[images[index].entry]
-    fun restoreIndex(entry: String, fallback: Int): Int = imageIndex.restoreIndex(entry, fallback)
-    fun cachedPage(index: Int): ComicPage? = synchronized(previews) { previews.get(index) }
-    fun page(index: Int): ComicPage = synchronized(lock) {
+    override fun cachedSize(index: Int): ImageSize? = entrySizes[images[index].entry]
+    override fun restoreIndex(entry: String, fallback: Int): Int = imageIndex.restoreIndex(entry, fallback)
+    override fun cachedPage(index: Int): ComicPage? = synchronized(previews) { previews.get(index) }
+    override fun page(index: Int): ComicPage = synchronized(lock) {
         check(!closed) { "漫画已经关闭，请重新打开。" }
         cachedPage(index)?.takeIf { it.file.exists() }?.let { return@synchronized it }
         val size = size(index)
         val file = imageFile(index)
         ComicPage(file, size, ComicPreviews.decode(file, size)).also { synchronized(previews) { previews.put(index, it) } }
     }
-    fun suggestMode(): String {
+    override fun suggestMode(): String {
         val sample = images.indices.take(6).mapNotNull { runCatching { size(it) }.getOrNull() }
         return if (sample.isNotEmpty() && sample.count { it.height.toFloat() / it.width > 2.6f } * 2 > sample.size) "SCROLL" else "PAGE"
     }

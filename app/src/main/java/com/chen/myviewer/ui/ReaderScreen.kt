@@ -31,7 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chen.myviewer.MainViewModel
 import com.chen.myviewer.ReaderSession
 import com.chen.myviewer.data.ReaderSettings
-import com.chen.myviewer.reader.comic.ComicArchive
+import com.chen.myviewer.reader.comic.ComicDocument
 import com.chen.myviewer.reader.comic.ComicImageView
 import com.chen.myviewer.reader.comic.ComicPage
 import com.chen.myviewer.reader.comic.ImageSize
@@ -97,14 +97,26 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
             Surface(Modifier.align(Alignment.TopCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f), shadowElevation = 3.dp) {
                 Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = close) { Icon(Icons.Outlined.ArrowBack, "返回书架") }
-                    Text(session.book.title, Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.titleMedium)
+                    Column(Modifier.weight(1f)) {
+                        Text(session.book.title, maxLines = 1, style = MaterialTheme.typography.titleMedium)
+                        session.chapter?.let { Text(it.label, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
+                    }
                     IconButton(onClick = { sheet = "settings" }) { Icon(Icons.Outlined.Tune, "阅读设置") }
                 }
             }
             Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), shadowElevation = 5.dp) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    session.onlineTitle?.let { title ->
+                        val chapters = title.manga.chapters.orEmpty().asReversed()
+                        val current = chapters.indexOfFirst { it.key == session.chapter?.key }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            TextButton(onClick = { pauseAutomatic(); vm.open(title.book, title, chapters[current - 1]) }, enabled = current > 0) { Text("上一章") }
+                            TextButton(onClick = { sheet = "online-chapters" }) { Text("章节目录") }
+                            TextButton(onClick = { pauseAutomatic(); vm.open(title.book, title, chapters[current + 1]) }, enabled = current >= 0 && current < chapters.lastIndex) { Text("下一章") }
+                        }
+                    }
                     TextButton(onClick = { sheet = "jump" }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (session.text != null) "${session.text.chapterAt(session.position.textOffset)} · ${(session.position.progress * 100).toInt()}%" else "第 ${session.position.imageIndex + 1} / ${session.comic!!.images.size} 页 · 点击跳转")
+                        Text(if (session.text != null) "${session.text.chapterAt(session.position.textOffset)} · ${(session.position.progress * 100).toInt()}%" else "第 ${session.position.imageIndex + 1} / ${session.comic!!.imageNames.size} 页 · 点击跳转")
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = { if (session.comic != null) menu = false; vm.mode(if (session.preferences.mode == "PAGE") "SCROLL" else "PAGE") }) { Text(if (session.preferences.mode == "PAGE") "切换连续" else "切换翻页") }
@@ -132,6 +144,17 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
         ModalBottomSheet(onDismissRequest = { sheet = null }) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).navigationBarsPadding()) {
                 when (active) {
+                    "online-chapters" -> {
+                        Text("章节目录", style = MaterialTheme.typography.titleLarge)
+                        val title = session.onlineTitle!!
+                        LazyColumn(Modifier.heightIn(max = 520.dp)) {
+                            items(title.manga.chapters.orEmpty(), key = { it.key }) { chapter ->
+                                TextButton(onClick = { pauseAutomatic(); sheet = null; vm.open(title.book, title, chapter) }, enabled = !chapter.locked, modifier = Modifier.fillMaxWidth()) {
+                                    Text(chapter.label, Modifier.fillMaxWidth())
+                                }
+                            }
+                        }
+                    }
                     "automatic" -> AutoReadingSettings(settings, session.preferences.mode, vm::updateSettings) {
                         menu = false; sheet = null; automatic.start()
                     }
@@ -167,13 +190,13 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         } }
                     }
                     "jump" -> {
-                        var value by remember { mutableFloatStateOf(if (session.text != null) session.position.progress else session.position.imageIndex.toFloat() / (session.comic!!.images.size - 1).coerceAtLeast(1)) }
+                        var value by remember { mutableFloatStateOf(if (session.text != null) session.position.progress else session.position.imageIndex.toFloat() / (session.comic!!.imageNames.size - 1).coerceAtLeast(1)) }
                         Text("阅读进度", style = MaterialTheme.typography.titleLarge)
-                        Text(if (session.text != null) "${(value * 100).toInt()}%" else "第 ${(value * (session.comic!!.images.size - 1)).toInt() + 1} 页", Modifier.padding(top = 20.dp))
+                        Text(if (session.text != null) "${(value * 100).toInt()}%" else "第 ${(value * (session.comic!!.imageNames.size - 1)).toInt() + 1} 页", Modifier.padding(top = 20.dp))
                         Slider(value, { value = it })
                         Button(onClick = {
                             if (session.text != null) vm.seekText((value * (session.text.text.length - 1).coerceAtLeast(0)).toInt())
-                            else vm.seekComic((value * (session.comic!!.images.size - 1)).toInt())
+                            else vm.seekComic((value * (session.comic!!.imageNames.size - 1)).toInt())
                             sheet = null; menu = false
                         }, modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) { Text("跳转") }
                     }
@@ -183,32 +206,34 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
     }
 }
 
-private data class ComicFile(val page: ComicPage? = null, val size: ImageSize? = null, val error: String? = null) {
+private data class ComicFile(val page: ComicPage? = null, val size: ImageSize? = null, val error: String? = null, val retry: (() -> Unit)? = null) {
     val ratio: Float get() = size?.let { it.width.toFloat() / it.height } ?: .7f
 }
 private data class ComicViewport(val index: Int, val top: Int, val bottom: Int)
 
 @Composable
-private fun rememberComicFile(archive: ComicArchive, index: Int): State<ComicFile> {
+private fun rememberComicFile(archive: ComicDocument, index: Int): State<ComicFile> {
+    var attempt by remember(archive, index) { mutableIntStateOf(0) }
     val cached = remember(archive, index) { archive.cachedPage(index) }
-    return key(archive, index) { produceState(ComicFile(cached, cached?.size ?: archive.cachedSize(index)), archive, index) {
+    return key(archive, index) { produceState(ComicFile(cached, cached?.size ?: archive.cachedSize(index)), archive, index, attempt) {
         try {
             val size = withContext(Dispatchers.IO) { archive.size(index) }
             if (value.page == null) value = ComicFile(size = size)
             value = ComicFile(withContext(Dispatchers.IO) { archive.page(index) }, size)
         } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { value = value.copy(error = e.message ?: "图片读取失败") }
+        catch (e: Exception) { value = value.copy(error = e.message ?: "图片读取失败", retry = { attempt++ }) }
     } }
 }
 
-private suspend fun prefetchComic(archive: ComicArchive, visible: List<Int>, forward: Boolean = true) = withContext(Dispatchers.IO) {
+private suspend fun prefetchComic(archive: ComicDocument, visible: List<Int>, forward: Boolean = true) = withContext(Dispatchers.IO) {
     if (visible.isEmpty()) return@withContext
     val first = visible.min(); val last = visible.max()
     // Load three pages in the travel direction and one behind, including when scrolling back up.
-    val nearby = (visible + (1..3).map { if (forward) last + it else first - it } + listOf(if (forward) first - 1 else last + 1)).filter { it in archive.images.indices }.distinct()
+    val nearby = (visible + (1..3).map { if (forward) last + it else first - it } + listOf(if (forward) first - 1 else last + 1)).filter { it in archive.imageNames.indices }.distinct()
     for (index in nearby) { ensureActive(); runCatching { archive.page(index) } }
+    if (!archive.eagerSizeReads) return@withContext
     // Dimensions are cheap header reads; stable item heights avoid re-layout as full images arrive.
-    for (index in (first - if (forward) 2 else 8).coerceAtLeast(0)..(last + if (forward) 8 else 2).coerceAtMost(archive.images.lastIndex)) {
+    for (index in (first - if (forward) 2 else 8).coerceAtLeast(0)..(last + if (forward) 8 else 2).coerceAtMost(archive.imageNames.lastIndex)) {
         ensureActive(); runCatching { archive.size(index) }
     }
 }
@@ -225,8 +250,8 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: Re
         AutoReadingEffect(automatic, "PAGE", settings, ready = {
             vm.reader.value?.takeIf { it.position.sessionId == token }?.position?.imageIndex?.let { archive.cachedPage(it) != null } == true
         }, nextPage = {
-            val index = vm.reader.value?.takeIf { it.position.sessionId == token }?.position?.imageIndex ?: archive.images.lastIndex
-            if (index >= archive.images.lastIndex) false else { vm.seekComic(index + 1); true }
+            val index = vm.reader.value?.takeIf { it.position.sessionId == token }?.position?.imageIndex ?: archive.imageNames.lastIndex
+            if (index >= archive.imageNames.lastIndex) false else { vm.seekComic(index + 1); true }
         }, finished = { vm.notice.value = "已到末尾，自动阅读已停止" }, flush = vm::flushPosition)
         LaunchedEffect(archive, session.position.imageIndex) { prefetchComic(archive, listOf(session.position.imageIndex)) }
         Box(Modifier.fillMaxSize()) {
@@ -240,8 +265,8 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: Re
                 view.onError = { vm.notice.value = it }
                 image.page?.let { view.setPage(it) } ?: view.clearPage()
             }, modifier = Modifier.fillMaxSize())
-            if (image.page == null) ComicPlaceholder(image.error, Modifier.fillMaxSize())
-            Text("${session.position.imageIndex + 1} / ${archive.images.size}", Modifier.align(Alignment.BottomEnd).padding(16.dp), color = Color.White.copy(alpha = .65f), style = MaterialTheme.typography.labelSmall)
+            if (image.page == null) ComicPlaceholder(image.error, Modifier.fillMaxSize(), image.retry)
+            Text("${session.position.imageIndex + 1} / ${archive.imageNames.size}", Modifier.align(Alignment.BottomEnd).padding(16.dp), color = Color.White.copy(alpha = .65f), style = MaterialTheme.typography.labelSmall)
         }
     } else {
         val state = rememberLazyListState(initialFirstVisibleItemIndex = session.position.imageIndex)
@@ -300,7 +325,7 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: Re
         }
         ComicZoomSurface(zoom, menu, overflow = { state.dispatchRawDelta(it) }) {
             LazyColumn(state = state, userScrollEnabled = !zoom.zoomed, modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(archive.images, key = { _, it -> it.name }) { index, _ ->
+                itemsIndexed(archive.imageNames, key = { _, it -> it }) { index, _ ->
                     val image by rememberComicFile(archive, index)
                     LaunchedEffect(image.error, automatic.running) {
                         if (image.error != null && automatic.running) { automatic.stop(); vm.notice.value = "图片读取失败，自动阅读已暂停" }
@@ -311,7 +336,7 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: Re
                             onRelease = { if (imageViews[index] === it) imageViews.remove(index) },
                             update = { view -> view.setPage(image.page!!); view.updateDisplayScale(zoom.scale); viewports[index]?.let { view.updateViewport(it.top, it.bottom) } },
                             modifier = itemModifier)
-                    } else ComicPlaceholder(image.error, itemModifier)
+                    } else ComicPlaceholder(image.error, itemModifier, image.retry)
                 }
             }
         }
@@ -319,6 +344,11 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: Re
 }
 
 @Composable
-private fun ComicPlaceholder(error: String?, modifier: Modifier) {
-    Box(modifier, contentAlignment = Alignment.Center) { if (error != null) Text(error, Modifier.padding(24.dp), color = Color.LightGray) else CircularProgressIndicator() }
+private fun ComicPlaceholder(error: String?, modifier: Modifier, retry: (() -> Unit)?) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        if (error != null) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(error, Modifier.padding(24.dp), color = Color.LightGray)
+            retry?.let { TextButton(onClick = it) { Text("重试图片") } }
+        } else CircularProgressIndicator()
+    }
 }

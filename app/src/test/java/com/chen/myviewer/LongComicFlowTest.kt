@@ -57,7 +57,7 @@ class LongComicFlowTest {
         waitForUi { vm.reader.value?.comic != null || vm.error.value != null }
         assertNull(vm.error.value)
         val archive = vm.reader.value!!.comic!!
-        assertEquals(48, archive.images.size)
+        assertEquals(48, archive.imageNames.size)
         assertEquals("SCROLL", vm.reader.value!!.preferences.mode)
         waitForUi { archive.cachedPage(0) != null && archive.cachedPage(3) != null }
         assertNull("Opening must not decode the entire book", archive.cachedPage(40))

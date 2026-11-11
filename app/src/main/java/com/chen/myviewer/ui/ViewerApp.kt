@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.view.WindowCompat
 import com.chen.myviewer.*
 import com.chen.myviewer.data.*
@@ -56,6 +57,7 @@ private val SettingsSectionSaver = listSaver<List<String>, String>(save = { it }
 
 @Composable
 fun ViewerApp(vm: MainViewModel) {
+    val sources: com.chen.myviewer.source.SourceViewModel = viewModel()
     MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors) {
         val library by vm.library.collectAsStateWithLifecycle()
         val reader by vm.reader.collectAsStateWithLifecycle()
@@ -88,7 +90,10 @@ fun ViewerApp(vm: MainViewModel) {
             }
         }
         val returnToTop: () -> Unit = { focus.clearFocus(); keyboard?.hide(); shelfState.requestScrollToItem(0) }
-        val openBook: (Book) -> Unit = { focus.clearFocus(); keyboard?.hide(); vm.open(it) }
+        val openBook: (Book) -> Unit = {
+            focus.clearFocus(); keyboard?.hide()
+            if (it.storage == "ONLINE") { sources.showSaved(it); tab = 1 } else vm.open(it)
+        }
         var sourceDialog by remember { mutableStateOf(false) }
         var recursive by rememberSaveable { mutableStateOf(true) }
         var managing by remember { mutableStateOf<Book?>(null) }
@@ -105,12 +110,12 @@ fun ViewerApp(vm: MainViewModel) {
             if (reader != null) key(reader!!.position.sessionId) { ReaderScreen(vm, reader!!, settings, snackbar) }
             else Scaffold(
                 snackbarHost = { SnackbarHost(snackbar) },
-                topBar = { TopAppBar(title = { Column { Text("MYVIEWER", fontSize = 10.sp, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(listOf("我的书库", "最近阅读", "偏好设置")[tab], fontWeight = FontWeight.Medium) } }, actions = {
+                topBar = { TopAppBar(title = { Column { Text("MYVIEWER", fontSize = 10.sp, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(listOf("我的书库", "发现漫画", "最近阅读", "偏好设置")[tab], fontWeight = FontWeight.Medium) } }, actions = {
                     if (tab == 0) IconButton(onClick = { sourceDialog = true }) { Icon(Icons.Outlined.Add, "导入书籍") }
                 }) },
                 bottomBar = { NavigationBar {
-                    val icons = listOf(Icons.Outlined.AutoStories, Icons.Outlined.History, Icons.Outlined.Tune)
-                    listOf("书库", "历史", "设置").forEachIndexed { index, label -> NavigationBarItem(
+                    val icons = listOf(Icons.Outlined.AutoStories, Icons.Outlined.Public, Icons.Outlined.History, Icons.Outlined.Tune)
+                    listOf("书库", "发现", "历史", "设置").forEachIndexed { index, label -> NavigationBarItem(
                         selected = tab == index,
                         onClick = {
                             focus.clearFocus(); keyboard?.hide()
@@ -130,7 +135,8 @@ fun ViewerApp(vm: MainViewModel) {
                         filter = shelfFilter, onFilter = { shelfFilter = it }, query = shelfQuery, onQuery = { shelfQuery = it },
                         columns = libraryColumns, state = shelfState, onTop = returnToTop,
                         open = openBook, manage = { managing = it }, import = { sourceDialog = true })
-                    1 -> {
+                    1 -> SourceScreen(sources, vm)
+                    2 -> {
                         val today by produceState(LocalDate.now().toString()) {
                             while (isActive) { delay(30000); value = LocalDate.now().toString() }
                         }
@@ -156,12 +162,12 @@ fun ViewerApp(vm: MainViewModel) {
         } }, confirmButton = { TextButton(onClick = { sourceDialog = false }) { Text("关闭") } })
         importing?.let { ImportDialog(it, vm) }
         if (managing != null) AlertDialog(onDismissRequest = { managing = null }, title = { Text(managing!!.title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("${if (managing!!.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (managing!!.storage == "COPY") "应用内副本" else "直接读取"}")
+            Text(if (managing!!.storage == "ONLINE") "在线漫画" else "${if (managing!!.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (managing!!.storage == "COPY") "应用内副本" else "直接读取"}")
             Text("移出书架后仍保留文件、进度、书签和历史。", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { relinking = managing; managing = null; relink.launch(arrayOf("*/*")) }) { Text("重新定位原文件，改为直接读取") }
+            if (managing!!.storage != "ONLINE") TextButton(onClick = { relinking = managing; managing = null; relink.launch(arrayOf("*/*")) }) { Text("重新定位原文件，改为直接读取") }
         } }, confirmButton = { TextButton(onClick = { vm.hide(managing!!); managing = null }) { Text("移出书架") } }, dismissButton = { TextButton(onClick = { managing = null }) { Text("关闭") } })
         if (error != null) AlertDialog(onDismissRequest = { vm.error.value = null }, title = { Text("暂时无法打开") }, text = { Text(error!!) }, confirmButton = {
-            failedBook?.let { failed -> TextButton(onClick = { vm.error.value = null; relinking = failed; relink.launch(arrayOf("*/*")) }) { Text("重新定位文件") } }
+            failedBook?.takeIf { it.storage != "ONLINE" }?.let { failed -> TextButton(onClick = { vm.error.value = null; relinking = failed; relink.launch(arrayOf("*/*")) }) { Text("重新定位文件") } }
         }, dismissButton = { TextButton(onClick = { vm.error.value = null }) { Text("关闭") } })
     }
 }
@@ -177,14 +183,24 @@ private fun StatusBarAppearance(background: Color) {
 
 @Composable
 internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
-    val bitmap by produceState<android.graphics.Bitmap?>(null, book.coverPath) { value = withContext(Dispatchers.IO) { book.coverPath?.let { BitmapFactory.decodeFile(it) } } }
+    val context = LocalContext.current
+    val bitmap by produceState<android.graphics.Bitmap?>(null, book.coverPath, book.localPath) {
+        value = withContext(Dispatchers.IO) {
+            if (book.storage == "ONLINE") {
+                val repository = (context.applicationContext as ViewerApplication).sources
+                try { repository.title(book).manga.cover?.let { repository.cover(it) } }
+                catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                catch (error: Exception) { null }
+            } else book.coverPath?.let { BitmapFactory.decodeFile(it) }
+        }
+    }
     Surface(modifier.aspectRatio(.72f), shape = RoundedCornerShape(9.dp), color = if (book.kind == "TEXT") MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), book.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else BoxWithConstraints(Modifier.fillMaxSize()) {
             val compact = maxWidth < 80.dp
             val tiny = maxWidth < 56.dp
             Column(Modifier.fillMaxSize().padding(if (tiny) 6.dp else if (compact) 8.dp else 12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Text(if (book.kind == "TEXT") "TXT" else "ZIP", fontSize = if (tiny) 8.sp else 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (book.kind == "TEXT") "TXT" else if (book.storage == "ONLINE") "在线" else "ZIP", fontSize = if (tiny) 8.sp else 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(book.title.take(24), fontFamily = FontFamily.Serif, fontSize = if (tiny) 11.sp else if (compact) 14.sp else 20.sp, maxLines = if (tiny) 3 else 4, overflow = TextOverflow.Ellipsis)
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = .15f))
             }

@@ -73,7 +73,7 @@ class AutoReadingFlowTest {
         assertEquals(backgroundAt, vm.reader.value!!.position.imageIndex)
 
         openControls(); startFromControls()
-        compose.runOnIdle { vm.seekComic(vm.reader.value!!.comic!!.images.lastIndex) }
+        compose.runOnIdle { vm.seekComic(vm.reader.value!!.comic!!.imageNames.lastIndex) }
         waitForUi { vm.reader.value!!.comic!!.cachedPage(9) != null }
         advance(3300)
         waitForUi { compose.onAllNodesWithText("暂停自动阅读").fetchSemanticsNodes().isEmpty() }
