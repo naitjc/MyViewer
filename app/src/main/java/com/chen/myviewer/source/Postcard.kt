@@ -59,7 +59,10 @@ internal class Postcard(private val bytes: ByteArray) {
     fun page(): SourcePage {
         require(unsigned() == 0L) { "此章节使用的文本、内嵌图片或 ZIP 页面格式尚未支持。" }
         val url = string()
-        val context = optional { buildMap { repeat(count()) { put(string(), string()) } } }
+        val context = optional {
+            val size = count()
+            buildMap { repeat(size) { put(string(), string()) } }
+        }
         optional(::string); boolean(); optional(::string)
         return SourcePage(url, context)
     }
@@ -75,6 +78,7 @@ internal class PostcardWriter {
         } while (remaining != 0L)
         return this
     }
+    fun signed(value: Long): PostcardWriter = unsigned((value shl 1) xor (value shr 63))
     fun string(value: String): PostcardWriter { val bytes = value.toByteArray(); unsigned(bytes.size.toLong()); output.write(bytes); return this }
     fun map(value: Map<String, String>): PostcardWriter { unsigned(value.size.toLong()); value.forEach { (key, item) -> string(key); string(item) }; return this }
     fun float(value: Float): PostcardWriter {

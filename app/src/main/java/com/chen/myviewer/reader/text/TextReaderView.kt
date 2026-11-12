@@ -18,6 +18,10 @@ class TextReaderView(context: Context) : View(context) {
     var onMenu: () -> Unit = {}
     var onPosition: (Int, Boolean) -> Unit = { _, _ -> }
     var onBoundary: (String) -> Unit = {}
+    var onFinished: () -> Unit = {}
+    private var finishScrollGesture = false
+    private var scrollDownX = 0f
+    private var scrollDownY = 0f
     private var document: TextDocument? = null
     private var settings = ReaderSettings()
     private var mode = "PAGE"
@@ -60,15 +64,18 @@ class TextReaderView(context: Context) : View(context) {
         val engine = paginator ?: return true
         if (engine.chunks.isEmpty()) return false
         scroller.forceFinished(true)
+        if (atScrollEnd()) return false
         moveScroll(distance)
-        val lastTop = max(0f, engine.chunk(engine.chunks.lastIndex).layout.height - (height - top - margin - 20 * density))
-        return scrollChunk < engine.chunks.lastIndex || scrollYLocal < lastTop - .01f
+        return true
     }
 
     private val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean { scroller.forceFinished(true); return true }
         override fun onSingleTapUp(e: MotionEvent): Boolean { performClick(); onMenu(); return true }
-        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean { moveScroll(distanceY); return true }
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+            moveScroll(distanceY)
+            return true
+        }
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
             lastFling = 0; scroller.fling(0, 0, 0, (-velocityY).toInt(), 0, 0, -100000, 100000); postInvalidateOnAnimation(); return true
         }
@@ -163,6 +170,12 @@ class TextReaderView(context: Context) : View(context) {
         }
         canvas.restore()
     }
+    private fun atScrollEnd(): Boolean {
+        val engine = paginator ?: return false
+        if (engine.chunks.isEmpty() || scrollChunk != engine.chunks.lastIndex) return false
+        val lastTop = max(0f, engine.chunk(scrollChunk).layout.height - (height - top - margin - 20 * density))
+        return scrollYLocal >= lastTop - .01f
+    }
     private fun moveScroll(delta: Float) {
         val engine = paginator ?: return
         if (engine.chunks.isEmpty()) return
@@ -185,8 +198,19 @@ class TextReaderView(context: Context) : View(context) {
     }
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (mode == "SCROLL") {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                finishScrollGesture = atScrollEnd()
+                scrollDownX = event.x
+                scrollDownY = event.y
+            }
+            if (event.pointerCount > 1 || event.actionMasked == MotionEvent.ACTION_CANCEL) finishScrollGesture = false
             val handled = detector.onTouchEvent(event)
             if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) report(true)
+            if (event.actionMasked == MotionEvent.ACTION_UP && finishScrollGesture && atScrollEnd() &&
+                scrollDownY - event.y > 48 * density && scrollDownY - event.y > abs(event.x - scrollDownX)) {
+                finishScrollGesture = false
+                onFinished()
+            }
             return handled || true
         }
         if (animator?.isRunning == true) return true
@@ -204,13 +228,13 @@ class TextReaderView(context: Context) : View(context) {
             }
             MotionEvent.ACTION_UP -> {
                 velocity?.addMovement(event); velocity?.computeCurrentVelocity(1000)
-                if (moved && target != null) {
+                if (moved) {
                     val speed = velocity?.xVelocity ?: 0f
                     animateTurn(turn > .25f || (abs(speed) > 750 && (speed < 0) == next))
                 } else if (!moved) {
                     performClick()
                     when { event.x < width * .28f -> { prepare(false); animateTurn(true) }; event.x > width * .72f -> { prepare(true); animateTurn(true) }; else -> onMenu() }
-                } else cancelTurn()
+                }
                 velocity?.recycle(); velocity = null; return true
             }
             MotionEvent.ACTION_CANCEL -> { animateTurn(false); velocity?.recycle(); velocity = null; return true }
@@ -221,7 +245,13 @@ class TextReaderView(context: Context) : View(context) {
         if (target == null || next != forward) { next = forward; target = page?.let { paginator?.adjacent(it, forward) } }
     }
     private fun animateTurn(commit: Boolean) {
-        if (target == null) { onBoundary(if (next) "已经到末尾了" else "已经是开头了"); cancelTurn(); return }
+        if (target == null) {
+            if (commit && page != null) {
+                if (next) { report(true); onFinished() } else onBoundary("已经是开头了")
+            }
+            cancelTurn()
+            return
+        }
         val selected = target
         var cancelled = false
         animator = ValueAnimator.ofFloat(turn, if (commit) 1f else 0f).apply {

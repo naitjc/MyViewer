@@ -70,12 +70,12 @@ internal fun AutoReadingSettings(settings: ReaderSettings, mode: String, onChang
     if (mode == "PAGE") {
         Text("翻页间隔 · ${settings.autoPageSeconds} 秒／页", style = MaterialTheme.typography.titleMedium)
         Slider(settings.autoPageSeconds.toFloat(), { onChange(settings.copy(autoPageSeconds = it.roundToInt())) }, valueRange = 2f..60f, steps = 57)
-        Text("每隔设定时间翻到下一页，读到末尾时自动停止。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("每隔设定时间翻到下一页，末页再次前进时自动退出并标记已读完。", color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
         Text("滚动速度 · ${settings.autoScrollSpeed} 档", style = MaterialTheme.typography.titleMedium)
         Slider(settings.autoScrollSpeed.toFloat(), { onChange(settings.copy(autoScrollSpeed = it.roundToInt())) }, valueRange = 1f..10f, steps = 8)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("慢"); Text("快") }
-        Text("匀速向下阅读，读到末尾时自动停止。", Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("匀速向下阅读，到达底部后自动退出并标记已读完。", Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     Text("触摸画面即可暂停，也可使用画面下方的暂停按钮。", Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
     Button(onClick = onStart, modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) { Text("开始自动阅读") }

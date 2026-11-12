@@ -121,6 +121,20 @@ interface ViewerDao {
             position.imageRatio, position.progress, position.sequence, System.currentTimeMillis())
         snapshotChapter(position.bookId, position.sessionId, position.sequence)
     }
+    @Query("SELECT chapterKey FROM chapter_positions WHERE bookId=:bookId AND completed=1")
+    suspend fun completedChapterKeys(bookId: String): List<String>
+    @Transaction suspend fun finishReading(position: ReadingPosition, chapterKeys: List<String>) {
+        saveReadingPosition(position)
+        val current = this.position(position.bookId)
+        if (current?.sessionId != position.sessionId || current.sequence != position.sequence) return
+        if (position.chapterKey.isEmpty()) setCompleted(position.bookId, true)
+        else {
+            setChapterCompleted(position.bookId, position.chapterKey, true)
+            if (chapterKeys.isNotEmpty() && completedChapterKeys(position.bookId).toSet().containsAll(chapterKeys)) {
+                setCompleted(position.bookId, true)
+            }
+        }
+    }
     @Query("SELECT * FROM book_preferences WHERE bookId=:id") suspend fun preferences(id: String): BookPreferences?
     @Upsert suspend fun putPreferences(preferences: BookPreferences)
     @Query("SELECT * FROM bookmarks WHERE bookId=:id ORDER BY offset") fun bookmarks(id: String): Flow<List<Bookmark>>

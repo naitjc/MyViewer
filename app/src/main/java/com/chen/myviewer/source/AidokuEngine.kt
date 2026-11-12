@@ -113,7 +113,6 @@ internal class AidokuEngine(context: Context, val source: InstalledSource, priva
         } finally { host.values.remove(mangaId); host.values.remove(chapterId) }
     }
     @Synchronized fun imageRequest(page: SourcePage): SourceRequest {
-        require("process_page_image" !in exports) { "此漫画源需要图片重组处理，当前版本尚未支持。" }
         if ("get_image_request" !in exports) return SourceRequest("GET", page.url)
         val urlId = host.store(PostcardWriter().string(page.url).bytes())
         val contextId = page.context?.let { host.store(PostcardWriter().map(it).bytes()) } ?: -1
@@ -124,4 +123,26 @@ internal class AidokuEngine(context: Context, val source: InstalledSource, priva
             return (host.values.remove(requestId) as? SourceRequest) ?: error("漫画源未返回有效图片请求。")
         } finally { host.values.remove(urlId); host.values.remove(contextId) }
     }
+    @Synchronized fun processPageImage(page: SourcePage, response: HttpResult, request: SourceRequest): ByteArray {
+        if ("process_page_image" !in exports) return response.data
+        val checkpoint = host.canvas.checkpoint()
+        var responseId = -1
+        var contextId = -1
+        try {
+            val imageId = host.canvas.image(response.data)
+            val writer = PostcardWriter().unsigned(response.status.toLong()).map(response.headers)
+                .unsigned(1).string(request.url).map(request.headers).signed(imageId.toLong())
+            responseId = host.store(writer.bytes())
+            contextId = page.context?.let { host.store(PostcardWriter().map(it).bytes()) } ?: -1
+            val reader = Postcard(invoke("process_page_image", responseId.toLong(), contextId.toLong()))
+            val result = reader.signed().toInt()
+            reader.complete()
+            return host.canvas.data(result)
+        } finally {
+            host.values.remove(responseId)
+            host.values.remove(contextId)
+            host.canvas.releaseAfter(checkpoint)
+        }
+    }
+
 }

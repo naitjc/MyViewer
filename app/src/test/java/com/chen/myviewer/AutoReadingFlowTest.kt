@@ -72,14 +72,15 @@ class AutoReadingFlowTest {
         compose.onNodeWithText("暂停自动阅读").assertDoesNotExist()
         assertEquals(backgroundAt, vm.reader.value!!.position.imageIndex)
 
+        val book = vm.reader.value!!.book
         openControls(); startFromControls()
         compose.runOnIdle { vm.seekComic(vm.reader.value!!.comic!!.imageNames.lastIndex) }
-        waitForUi { vm.reader.value!!.comic!!.cachedPage(9) != null }
+        waitForUi { vm.reader.value == null || vm.reader.value?.comic?.cachedPage(9) != null }
         advance(3300)
         waitForUi { compose.onAllNodesWithText("暂停自动阅读").fetchSemanticsNodes().isEmpty() }
-        assertEquals(9, vm.reader.value!!.position.imageIndex)
-        val book = vm.reader.value!!.book
-        compose.runOnIdle { vm.closeReader() }
+        assertNull(vm.reader.value)
+        waitForUi { runBlocking { vm.repository.dao.book(book.id) }!!.completed }
+        assertEquals(9, runBlocking { vm.repository.dao.position(book.id) }!!.imageIndex)
         advance(64)
         compose.runOnIdle { vm.open(book) }
         waitForUi { vm.reader.value?.comic != null }
@@ -101,16 +102,16 @@ class AutoReadingFlowTest {
         assertEquals(stopped.imageIndex, vm.reader.value!!.position.imageIndex)
         assertEquals(stopped.imageRatio, vm.reader.value!!.position.imageRatio, .001f)
 
+        val book = vm.reader.value!!.book
         openControls(); startFromControls()
         compose.runOnIdle { vm.seekComic(9, 1f) }
-        waitForUi { vm.reader.value!!.comic!!.cachedPage(9) != null }
+        waitForUi { vm.reader.value == null || vm.reader.value?.comic?.cachedPage(9) != null }
         advance(500)
         waitForUi { compose.onAllNodesWithText("暂停自动阅读").fetchSemanticsNodes().isEmpty() }
-        val last = vm.reader.value!!.position
-        assertTrue(last.progress > .8f)
-        compose.runOnIdle { vm.closeReader() }
+        assertNull(vm.reader.value)
         advance(64)
-        waitForUi { runBlocking { vm.repository.dao.position(last.bookId)?.progress ?: 0f } > .8f }
+        waitForUi { runBlocking { vm.repository.dao.book(book.id) }!!.completed }
+        assertEquals(1f, runBlocking { vm.repository.dao.position(book.id) }!!.progress)
     }
 
     @Test fun novelSupportsAutomaticPagesAndContinuousScrollingWithManualPause() {

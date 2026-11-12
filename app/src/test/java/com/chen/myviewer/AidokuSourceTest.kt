@@ -73,6 +73,9 @@ class AidokuSourceTest {
             }
             repository.download(title, chapter) { _, _ -> }
             assertTrue(repository.downloaded(title.book.id, chapter.key))
+            repository.uninstall(entry.id)
+            repository.uninstall(entry.id)
+            assertFalse(repository.installed().any { it.id == entry.id })
             val requestCount = requests.size
             offline = true
             File(context.cacheDir, "online").deleteRecursively()
@@ -85,6 +88,10 @@ class AidokuSourceTest {
             }
             assertEquals(requestCount, requests.size)
             assertTrue(db.dao().book(title.book.id)!!.onShelf)
+            repository.installPackage(entry, javaClass.getResourceAsStream("/aidoku/en.guya-v2.aix")!!.use { it.readBytes() })
+            assertTrue(repository.installed().any { it.id == entry.id })
+            try { repository.uninstall("../sources"); fail("Unsafe source ID must fail") }
+            catch (_: IllegalArgumentException) { }
         } finally { db.close() }
     }
 

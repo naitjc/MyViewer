@@ -59,13 +59,6 @@ class OnlineReadingFlowTest {
         waitForUi { compose.onAllNodesWithText("开始阅读").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("章节 · 2").assertExists()
         capture("online-offline-chapters")
-        compose.onNodeWithText("标记已读完").performClick()
-        waitForUi { vm.library.value.firstOrNull { it.book.id == title.book.id }?.book?.completed == true }
-        compose.onNodeWithText("取消已读完标记").performClick()
-        compose.onNodeWithContentDescription("章节操作：${chapters.last().label}").performClick()
-        compose.onAllNodesWithText("标记已读完").onLast().performClick()
-        waitForUi { runBlocking { vm.repository.dao.chapterPosition(title.book.id, "one") }?.completed == true }
-        capture("online-chapter-completed")
         compose.onNodeWithText("开始阅读").performClick()
         waitForUi { vm.reader.value?.chapter?.key == "one" && vm.reader.value?.comic?.cachedPage(0) != null }
         compose.runOnIdle { vm.seekComic(1); vm.flushPosition() }
@@ -75,20 +68,24 @@ class OnlineReadingFlowTest {
         compose.onNodeWithText("下一章").performClick()
         waitForUi { vm.reader.value?.chapter?.key == "two" }
         assertEquals(0, vm.reader.value!!.position.imageIndex)
-        compose.runOnIdle { vm.seekComic(2); vm.flushPosition(); vm.open(title.book, title, chapters.last()) }
+        compose.runOnIdle { vm.seekComic(2) }
+        waitForUi { vm.reader.value?.comic?.cachedPage(2) != null }
+        val secondToken = vm.reader.value!!.position.sessionId
+        compose.runOnIdle { vm.turnComic(true, secondToken) }
+        waitForUi { vm.reader.value == null && runBlocking { vm.repository.dao.chapterPosition(title.book.id, "two") }?.completed == true }
+        assertFalse(runBlocking { vm.repository.dao.book(title.book.id) }!!.completed)
+        compose.runOnIdle { vm.open(title.book, title, chapters.last()) }
         waitForUi { vm.reader.value?.chapter?.key == "one" }
         assertEquals(1, vm.reader.value!!.position.imageIndex)
-        compose.runOnIdle { vm.closeReader() }
-        waitForUi { vm.reader.value == null && compose.onAllNodesWithText("继续阅读").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("继续阅读").performClick()
-        waitForUi { vm.reader.value?.chapter?.key == "one" }
-        assertEquals(1, vm.reader.value!!.position.imageIndex)
-        assertEquals(2, runBlocking { vm.repository.dao.chapterPosition(title.book.id, "two") }!!.imageIndex)
-        assertNull(vm.error.value)
+        compose.runOnIdle { vm.seekComic(2) }
+        waitForUi { vm.reader.value?.comic?.cachedPage(2) != null }
+        compose.runOnIdle { vm.turnComic(true, vm.reader.value!!.position.sessionId) }
+        waitForUi { vm.reader.value == null && vm.library.value.first { it.book.id == title.book.id }.book.completed }
         assertEquals(true, runBlocking { vm.repository.dao.chapterPosition(title.book.id, "one") }!!.completed)
-        compose.runOnIdle { vm.closeReader() }
+        capture("online-chapter-completed")
         compose.onNodeWithText("书库").performClick()
-        waitForUi { compose.onAllNodesWithText("在线漫画", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("已读完").assertExists()
+
     }
     @Test fun sourceCatalogFiltersLanguagesAndOpensInstalledSourceSettings() {
         val sources = ViewModelProvider(compose.activity)[SourceViewModel::class.java]
@@ -125,6 +122,11 @@ class OnlineReadingFlowTest {
         compose.runOnIdle { sources.back() }
         compose.onNodeWithText("葡文源").assertExists()
         assertEquals("pt", sources.state.value.language)
+        compose.onNodeWithText("全部语言").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("卸载 Guya").performClick()
+        compose.onNodeWithText("卸载").performClick()
+        waitForUi { sources.state.value.installed.none { it.id == guya.id } }
+        compose.onNodeWithContentDescription("浏览 Guya").assertDoesNotExist()
     }
     private fun waitForUi(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 20_000

@@ -22,6 +22,7 @@ internal class AidokuHost(context: Context, sourceId: String, val http: SourceHt
     var lastMessage: String? = null
     private val defaults = context.getSharedPreferences("source-$sourceId", Context.MODE_PRIVATE)
     private val html = AidokuHtml(this)
+    val canvas = AidokuCanvas(this)
     private var permits = 0
     private var periodMs = 0L
     private val requestTimes = ArrayDeque<Long>()
@@ -56,6 +57,7 @@ internal class AidokuHost(context: Context, sourceId: String, val http: SourceHt
             "env" -> environment(name, args)
             "net" -> network(name, args)
             "html" -> try { html.call(name, args) } catch (error: org.jsoup.select.Selector.SelectorParseException) { -4 }
+            "canvas" -> canvas.call(name, args)
             "defaults" -> preference(name, args)
             "js" -> javascript(name, args)
             else -> error("暂不支持漫画源接口 $module.$name。")
@@ -163,6 +165,7 @@ internal class AidokuHost(context: Context, sourceId: String, val http: SourceHt
                 if (data.size > args[2]) -6 else { memory.write(args[1].toInt(), data); 0 }
             }
             "get_header" -> store(response?.headers?.entries?.firstOrNull { it.key.equals(string(args, 1), true) }?.value).toLong()
+            "get_image" -> response?.let { canvas.image(it.data).toLong() } ?: -8
             "get_status_code" -> response?.status?.toLong() ?: -8
             "get_url" -> store(response?.url).toLong()
             "html" -> response?.let { store(Jsoup.parse(it.data.inputStream(), null, it.url)).toLong() } ?: -8

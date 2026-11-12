@@ -196,14 +196,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         notice.value = "已保存书签"
     }
     fun deleteBookmark(id: String) = viewModelScope.launch { repository.dao.deleteBookmark(id) }
-    fun closeReader() {
+    fun finishReading(token: String) {
+        val session = reader.value?.takeIf { it.position.sessionId == token } ?: return
+        val comic = session.comic
+        if (comic != null && comic.cachedPage(comic.imageNames.lastIndex) == null) return
+        closeCurrentReader(completed = true)
+    }
+    fun turnComic(forward: Boolean, token: String) {
+        val session = reader.value?.takeIf { it.position.sessionId == token } ?: return
+        val comic = session.comic ?: return
+        if (forward && session.position.imageIndex == comic.imageNames.lastIndex) {
+            if (comic.cachedPage(session.position.imageIndex) != null) finishReading(token)
+        } else seekComic(session.position.imageIndex + if (forward) 1 else -1)
+    }
+    fun closeReader() = closeCurrentReader(completed = false)
+    private fun closeCurrentReader(completed: Boolean) {
         readingClock.stop()
         val previous = reader.value
-        val position = latestComicPosition?.takeIf { it.sessionId == previous?.position?.sessionId } ?: previous?.position
-        position?.let { closeSave = viewModelScope.async { repository.save(it.copy(sequence = ++sequence)) } }
+        var position = latestComicPosition?.takeIf { it.sessionId == previous?.position?.sessionId } ?: previous?.position
+        if (completed && previous != null && position != null) {
+            val lastImage = previous.comic?.imageNames?.lastIndex ?: position.imageIndex
+            position = position.copy(progress = 1f, textOffset = previous.text?.text?.lastIndex?.coerceAtLeast(0) ?: position.textOffset,
+                imageIndex = lastImage, imageEntry = previous.comic?.imageNames?.get(lastImage) ?: position.imageEntry, imageRatio = 1f)
+        }
+        position?.let {
+            val saved = it.copy(sequence = ++sequence)
+            closeSave = viewModelScope.async {
+                try {
+                    if (completed) repository.dao.finishReading(saved, previous?.onlineTitle?.manga?.chapters.orEmpty().map { chapter -> chapter.key })
+                    else repository.save(saved)
+                } catch (error: CancellationException) { throw error }
+                catch (error: Exception) { notice.value = "阅读状态保存失败，请重新打开后重试。" }
+            }
+        }
         latestComicPosition = null
         reader.value = null; loading.value = null; openJob?.cancel()
         viewModelScope.launch(Dispatchers.IO) { previous?.comic?.close() }
+        if (completed) notice.value = if (previous?.chapter != null) "本章已读完" else "已读完"
     }
     fun updateSettings(value: ReaderSettings) = viewModelScope.launch { app.settings.update(value) }
     fun setLibrarySort(value: LibrarySort) = viewModelScope.launch { app.settings.setLibrarySort(value) }
@@ -215,13 +244,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             notice.value = if (completed) "已标记已读完" else "已取消已读完标记"
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { notice.value = "阅读状态保存失败，请重试。" }
-    }
-    fun setChapterCompleted(book: Book, chapterKey: String, completed: Boolean) = viewModelScope.launch {
-        try {
-            repository.dao.setChapterCompleted(book.id, chapterKey, completed)
-            notice.value = if (completed) "章节已标记已读完" else "章节已标记未读完"
-        } catch (error: CancellationException) { throw error }
-        catch (error: Exception) { notice.value = "章节状态保存失败，请重试。" }
     }
     fun clearHistory() = viewModelScope.launch { repository.dao.clearHistory() }
     fun removeFolder(uri: String) = viewModelScope.launch { repository.dao.deleteFolder(uri) }

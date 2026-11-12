@@ -40,6 +40,31 @@ class TextGestureTest {
         }
         controller.pause().stop().destroy()
     }
+    @Test fun finalPageRequiresACommittedForwardTurn() {
+        val controller = Robolectric.buildActivity(Activity::class.java).setup()
+        val view = TextReaderView(controller.get())
+        controller.get().setContentView(view)
+        view.layout(0, 0, 400, 700)
+        val doc = TextParser.fromText("末页测试文字。\n".repeat(50))
+        view.configure(doc, ReaderSettings(), "PAGE", doc.text.lastIndex)
+        var finished = 0
+        view.onFinished = { finished++ }
+        val start = SystemClock.uptimeMillis()
+        event(view, start, start, MotionEvent.ACTION_DOWN, 330f)
+        event(view, start, start + 300, MotionEvent.ACTION_MOVE, 300f)
+        event(view, start, start + 600, MotionEvent.ACTION_UP, 300f)
+        assertEquals(0, finished)
+        event(view, start, start + 700, MotionEvent.ACTION_DOWN, 330f)
+        event(view, start, start + 800, MotionEvent.ACTION_MOVE, 100f)
+        event(view, start, start + 900, MotionEvent.ACTION_CANCEL, 100f)
+        assertEquals(0, finished)
+        event(view, start, start + 1000, MotionEvent.ACTION_DOWN, 330f)
+        event(view, start, start + 1100, MotionEvent.ACTION_MOVE, 100f)
+        event(view, start, start + 1200, MotionEvent.ACTION_UP, 100f)
+        assertEquals(1, finished)
+        controller.pause().stop().destroy()
+    }
+
     private fun event(view: TextReaderView, down: Long, now: Long, type: Int, x: Float) {
         val event = MotionEvent.obtain(down, now, type, x, 350f, 0)
         view.onTouchEvent(event); event.recycle()

@@ -12,8 +12,8 @@ android {
         applicationId = "com.chen.myviewer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.2.1"
+        versionCode = 14
+        versionName = "0.2.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }

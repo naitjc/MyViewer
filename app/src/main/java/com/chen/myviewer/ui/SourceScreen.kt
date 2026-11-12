@@ -82,6 +82,7 @@ fun SourceScreen(vm: SourceViewModel, reader: MainViewModel) {
 private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, repository: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var languageMenu by remember { mutableStateOf(false) }
+    var removingSource by remember { mutableStateOf<SourceEntry?>(null) }
     val installed = state.installed.associateBy { it.id }
     val available = (state.installed.map { it.entry } + state.catalog).groupBy { it.id }
         .map { (_, versions) -> versions.maxBy { it.version } }
@@ -137,10 +138,18 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
                     if (local == null) FilledTonalButton(onClick = { vm.install(entry) }, enabled = state.busy == null) { Text("安装") }
                     else if (local.entry.version < entry.version) TextButton(onClick = { vm.install(entry) }, enabled = state.busy == null) { Text("更新") }
                     else IconButton(onClick = { vm.choose(local.entry) }, enabled = state.busy == null) { Icon(Icons.Outlined.Search, "浏览 ${entry.name}") }
+                    if (local != null) IconButton(onClick = { removingSource = local.entry }, enabled = state.busy == null) {
+                        Icon(Icons.Outlined.DeleteOutline, "卸载 ${entry.name}")
+                    }
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
             }
         }
+    }
+    removingSource?.let { entry ->
+        AlertDialog(onDismissRequest = { removingSource = null }, title = { Text("卸载漫画源？") }, text = { Text(entry.name) },
+            confirmButton = { TextButton(onClick = { removingSource = null; vm.uninstall(entry) }) { Text("卸载") } },
+            dismissButton = { TextButton(onClick = { removingSource = null }) { Text("取消") } })
     }
 }
 
@@ -192,9 +201,7 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                     Text(title.manga.authors.joinToString(" / "), style = MaterialTheme.typography.bodyMedium)
                     Text(title.sourceId, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     FilledTonalButton(onClick = vm::addToShelf, enabled = !book.onShelf && state.busy == null) { Text(if (book.onShelf) "已加入书架" else "加入书架") }
-                    TextButton(onClick = { reader.setCompleted(book, !book.completed) }) {
-                        Text(if (book.completed) "取消已读完标记" else "标记已读完")
-                    }
+                    if (book.completed) Text("已读完", color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -208,8 +215,7 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
         if (chapters.isEmpty()) item { TextButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Text("刷新章节列表") } }
         items(chapters, key = { it.key }) { chapter ->
             val saved = progress[chapter.key]
-            val completed = saved?.completed ?: ((saved?.progress ?: 0f) >= .999f)
-            var chapterMenu by remember { mutableStateOf(false) }
+            val completed = saved?.completed == true
             val downloaded = chapter.key in state.downloaded
             Row(Modifier.fillMaxWidth().clickable(enabled = !chapter.locked && state.busy == null) { reader.open(title.book, title, chapter) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -222,15 +228,6 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                             else -> null
                         }).joinToString(" · ")
                     if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                }
-                Box {
-                    IconButton(onClick = { chapterMenu = true }) { Icon(Icons.Outlined.MoreVert, "章节操作：${chapter.label}") }
-                    DropdownMenu(chapterMenu, { chapterMenu = false }) {
-                        DropdownMenuItem(text = { Text(if (completed) "标记为未读完" else "标记已读完") }, onClick = {
-                            reader.setChapterCompleted(book, chapter.key, !completed)
-                            chapterMenu = false
-                        })
-                    }
                 }
                 if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = state.downloadStatus == null) { Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载") }
                 else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked && state.downloadStatus == null) { Icon(Icons.Outlined.Download, "下载 ${chapter.label}") }

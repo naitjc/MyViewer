@@ -79,6 +79,15 @@ class SourceRepository internal constructor(private val context: Context, privat
         }
     }
 
+    suspend fun uninstall(sourceId: String) = installLock.withLock {
+        runInterruptible(Dispatchers.IO) {
+            require(sourceId.matches(Regex("[A-Za-z0-9._-]+")) && sourceId !in setOf(".", "..")) { "漫画源 ID 无效。" }
+            val directory = File(root, sourceId)
+            check(directory.deleteRecursively()) { "漫画源卸载失败，请重试。" }
+            synchronized(engines) { engines.keys.removeAll { it.startsWith("$sourceId/") } }
+        }
+    }
+
     internal fun installPackage(entry: SourceEntry, bytes: ByteArray): InstalledSource {
         require(entry.id.matches(Regex("[A-Za-z0-9._-]+")) && entry.id !in setOf(".", "..")) { "漫画源 ID 无效。" }
         val directory = File(root, entry.id).apply { mkdirs() }
@@ -191,9 +200,14 @@ class SourceRepository internal constructor(private val context: Context, privat
         val page = pages[index]
         val target = File(cacheDirectory(title.book.id, chapter.key), "$index-${ComicArchive.digest(page.url)}.img")
         if (target.exists() && target.length() > 0) { target.setLastModified(System.currentTimeMillis()); return target }
-        val request = withEngine(title.sourceId) { it.imageRequest(page) }
-        require(request.method == "GET") { "这个源的图片请求方式尚未支持。" }
-        synchronized(target.absolutePath.intern()) { http.download(request.url, target, request.headers) }
+        synchronized(target.absolutePath.intern()) {
+            if (!target.exists()) withEngine(title.sourceId) { engine ->
+                val request = engine.imageRequest(page)
+                val response = http.request(request.url, request.headers, request.method, request.body, request.timeout)
+                require(response.status in 200..299) { "图片请求失败（HTTP ${response.status}）。" }
+                saveImage(target, engine.processPageImage(page, response, request))
+            }
+        }
         trimCache(target)
         return target
     }

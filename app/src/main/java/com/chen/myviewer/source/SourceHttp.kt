@@ -63,11 +63,15 @@ internal class SourceHttp(context: Context, interceptor: okhttp3.Interceptor? = 
         val response = request(url, headers)
         require(response.status in 200..299) { "图片请求失败（HTTP ${response.status}）。" }
         require(response.data.isNotEmpty()) { "图片内容为空。" }
-        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        android.graphics.BitmapFactory.decodeByteArray(response.data, 0, response.data.size, bounds)
-        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "漫画源返回的内容无法解码为图片。" }
-        atomicWrite(target, response.data)
+        saveImage(target, response.data)
     }
+}
+
+internal fun saveImage(target: File, bytes: ByteArray) {
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    require(bounds.outWidth > 0 && bounds.outHeight > 0) { "漫画源返回的内容无法解码为图片。" }
+    atomicWrite(target, bytes)
 }
 
 internal data class HttpResult(val status: Int, val headers: Map<String, String>, val url: String, val data: ByteArray)

@@ -61,9 +61,11 @@ internal class ComicCanvasState {
 }
 
 @Composable
-internal fun ComicZoomSurface(state: ComicCanvasState, menu: () -> Unit, overflow: (Float) -> Unit, content: @Composable BoxScope.() -> Unit) {
+internal fun ComicZoomSurface(state: ComicCanvasState, menu: () -> Unit, overflow: (Float) -> Unit, atEnd: () -> Boolean = { false }, onBeyondEnd: () -> Unit = {}, content: @Composable BoxScope.() -> Unit) {
     val onMenu by rememberUpdatedState(menu)
     val onOverflow by rememberUpdatedState(overflow)
+    val currentAtEnd by rememberUpdatedState(atEnd)
+    val currentBeyondEnd by rememberUpdatedState(onBeyondEnd)
     Box(Modifier.fillMaxSize().clipToBounds().semantics { stateDescription = "缩放 ${(state.scale * 100).toInt()}%" }.onSizeChanged { state.size = it }.pointerInput(state) {
         // Observe the initial pass so native image views cannot swallow taps. Ordinary one-finger
         // scrolling remains with LazyColumn; only zooming and held magnification consume motion.
@@ -73,6 +75,7 @@ internal fun ComicZoomSurface(state: ComicCanvasState, menu: () -> Unit, overflo
             var lastTap = Offset.Zero
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val beganAtEnd = currentAtEnd() && !state.zoomed
                 val doubleTap = down.uptimeMillis - lastTapTime in 0..viewConfiguration.doubleTapTimeoutMillis && (down.position - lastTap).getDistance() < 64 * density
                 pendingTap?.cancel()
                 var tap = true
@@ -107,7 +110,11 @@ internal fun ComicZoomSurface(state: ComicCanvasState, menu: () -> Unit, overflo
                             if (tap) {
                                 if (doubleTap) { lastTapTime = -10000; state.toggle(down.position) }
                                 else { lastTapTime = lastTime; lastTap = down.position; pendingTap = launch { delay(viewConfiguration.doubleTapTimeoutMillis); onMenu() } }
-                            } else lastTapTime = -10000
+                            } else {
+                                lastTapTime = -10000
+                                val delta = lastPosition - down.position
+                                if (beganAtEnd && !multi && !holding && !state.zoomed && -delta.y > 48 * density && -delta.y > kotlin.math.abs(delta.x)) currentBeyondEnd()
+                            }
                             break
                         }
                     }

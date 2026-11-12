@@ -90,7 +90,7 @@ class LibraryPagesFlowTest {
     @Test fun settingsGroupsToggleIndependentlyAndKeepStateAcrossNavigation() {
         compose.onNodeWithText("设置").performClick()
         waitForUi { compose.onNodeWithText("每行书籍数量").isDisplayed() }
-        assertSection("书架布局", true)
+        assertSection("书架布局", false)
         assertSection("小说阅读", false)
         compose.onNodeWithText("阅读预览").assertDoesNotExist()
         capture("settings-folded-default")
@@ -98,12 +98,13 @@ class LibraryPagesFlowTest {
         compose.onNodeWithText("护眼").performScrollTo().performClick()
         waitForUi { vm.settings.value.background == "GREEN" }
         assertSection("小说阅读", true)
-        assertSection("书架布局", true)
+        assertSection("书架布局", false)
         compose.onNodeWithText("阅读预览").performScrollTo()
         capture("settings-reading-expanded")
         section("小说阅读").performScrollTo().performClick()
         waitForUi { compose.onAllNodesWithText("阅读预览").fetchSemanticsNodes().isEmpty() }
         assertEquals("GREEN", vm.settings.value.background)
+        expandSection("书架布局")
         section("书架布局").performScrollTo().performClick()
         compose.onNodeWithText("3 本").assertDoesNotExist()
         capture("settings-all-collapsed")

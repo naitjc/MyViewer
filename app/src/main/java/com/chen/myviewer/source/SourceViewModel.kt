@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.chen.myviewer.ViewerApplication
 import com.chen.myviewer.data.Book
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +37,7 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
     val state = MutableStateFlow(SourceBrowserState(repositoryUrl = repository.repositoryUrl))
     private var job: Job? = null
     private var downloadJob: Job? = null
+    private var downloadingSource: String? = null
     private var generation = 0L
     init { viewModelScope.launch {
         val installed = withContext(Dispatchers.IO) { repository.installed() }
@@ -49,6 +51,12 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun install(entry: SourceEntry) = work("正在安装 ${entry.name}…") {
         repository.install(entry)
+        val installed = withContext(Dispatchers.IO) { repository.installed() }
+        state.update { it.copy(installed = installed) }
+    }
+    fun uninstall(entry: SourceEntry) = work("正在卸载 ${entry.name}…") {
+        if (downloadingSource == entry.id) downloadJob?.cancelAndJoin()
+        repository.uninstall(entry.id)
         val installed = withContext(Dispatchers.IO) { repository.installed() }
         state.update { it.copy(installed = installed) }
     }
@@ -96,6 +104,7 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
     fun download(chapter: SourceChapter) {
         val title = state.value.detail ?: return
         if (downloadJob?.isActive == true) return
+        downloadingSource = title.sourceId
         downloadJob = viewModelScope.launch {
             state.update { it.copy(downloadStatus = "正在下载 ${chapter.label}…", error = null) }
             try {
@@ -103,7 +112,7 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
                 if (state.value.detail?.book?.id == title.book.id) state.update { it.copy(downloaded = it.downloaded + chapter.key) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { state.update { it.copy(error = error.message ?: "下载失败，请重试") } }
-            finally { state.update { it.copy(downloadStatus = null) } }
+            finally { downloadingSource = null; state.update { it.copy(downloadStatus = null) } }
         }
     }
     fun deleteDownload(chapter: SourceChapter) {

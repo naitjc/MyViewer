@@ -132,6 +132,7 @@ class BookshelfFlowTest {
         waitForUi { vm.library.value.size == 12 }
         chooseSort(LibrarySort.TITLE)
         compose.onNodeWithText("设置").performClick()
+        compose.onNodeWithContentDescription("书架布局分组").performClick()
         compose.onNodeWithText("4 本").performClick()
         waitForUi { vm.libraryColumns.value == 4 }
         compose.onNodeWithText("书库").performClick()
@@ -151,7 +152,7 @@ class BookshelfFlowTest {
         assertEquals(6, vm.libraryColumns.value)
     }
 
-    @Test fun completedBooksCanBeMarkedFromShelfAndUnmarkedWhileReading() {
+    @Test fun finalForwardTurnCompletesBookAndCompletionCanBeCleared() {
         compose.onNodeWithText("书库").performClick()
         val vm = ViewModelProvider(compose.activity)[MainViewModel::class.java]
         val file = File(compose.activity.cacheDir, "completed-story.txt").apply { writeText("第1章\n完成标记测试。\n".repeat(100)) }
@@ -159,21 +160,22 @@ class BookshelfFlowTest {
             vm.repository.dao.putBook(Book("completion-local", "完读测试", "TEXT", "DIRECT", Uri.fromFile(file).toString(), lastOpenedAt = 1))
         }
         waitForUi { compose.onAllNodesWithText("完读测试").fetchSemanticsNodes().isNotEmpty() }
-        compose.onAllNodesWithText("完读测试").onLast().performTouchInput { longClick(center) }
-        compose.onNodeWithText("标记已读完").performClick()
-        waitForUi { vm.library.value.single().book.completed }
-        compose.onNodeWithText("已读完").assertExists()
+        compose.onAllNodesWithText("完读测试").onLast().performClick()
+        waitForUi { vm.reader.value?.text != null }
+        compose.runOnIdle { vm.seekText(vm.reader.value!!.text!!.text.lastIndex) }
+        compose.waitForIdle()
+        assertFalse(vm.library.value.single().book.completed)
+        compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .9f, height * .5f)) }
+        waitForUi { vm.reader.value == null && vm.library.value.single().book.completed }
+        assertTrue(compose.onAllNodesWithText("已读完").fetchSemanticsNodes().isNotEmpty())
         compose.onNodeWithText("继续阅读").assertDoesNotExist()
         capture("bookshelf-completed")
         compose.activityRule.scenario.recreate()
-        compose.onNodeWithText("已读完").assertExists()
-        compose.onAllNodesWithText("完读测试").onLast().performClick()
+        assertTrue(compose.onAllNodesWithText("已读完").fetchSemanticsNodes().isNotEmpty())
+        compose.onAllNodesWithText("完读测试").onLast().performTouchInput { longClick(center) }
+        compose.onNodeWithText("取消已读完标记").performClick()
         val current = ViewModelProvider(compose.activity)[MainViewModel::class.java]
-        waitForUi { current.reader.value?.text != null }
-        compose.onRoot().performTouchInput { click(center) }
-        compose.onNodeWithContentDescription("取消已读完标记").performClick()
         waitForUi { !current.library.value.single().book.completed }
-        compose.runOnIdle { current.closeReader() }
         compose.onNodeWithText("已读完").assertDoesNotExist()
         compose.onNodeWithText("继续阅读").assertExists()
     }

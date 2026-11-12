@@ -48,6 +48,28 @@ class CompletionStateTest {
         } finally { db.close() }
     }
 
+    @Test fun completionRejectsStaleSessionsAndRequiresEveryKnownChapter() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val db = Room.inMemoryDatabaseBuilder(context, ViewerDatabase::class.java).allowMainThreadQueries().build()
+        try {
+            val dao = db.dao()
+            dao.putBook(Book("series", "故事", "COMIC", "ONLINE", "myviewer://series"))
+            val old = ReadingPosition("series", sessionId = "old", chapterKey = "one")
+            val current = old.copy(sessionId = "current", chapterKey = "two")
+            dao.putPosition(current)
+            dao.finishReading(old.copy(progress = 1f, sequence = 99), listOf("one", "two"))
+            assertNull(dao.chapterPosition("series", "one"))
+            assertFalse(dao.book("series")!!.completed)
+            dao.finishReading(current.copy(progress = 1f, sequence = 1), listOf("one", "two"))
+            assertEquals(true, dao.chapterPosition("series", "two")!!.completed)
+            assertFalse(dao.book("series")!!.completed)
+            val next = current.copy(sessionId = "next", chapterKey = "one")
+            dao.putPosition(next)
+            dao.finishReading(next.copy(progress = 1f, sequence = 1), listOf("one", "two"))
+            assertTrue(dao.book("series")!!.completed)
+        } finally { db.close() }
+    }
+
     @Test fun schemaThreeUpgradesAndPersistsManualCompletionWithoutLosingExistingData() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val name = "completion-upgrade.db"

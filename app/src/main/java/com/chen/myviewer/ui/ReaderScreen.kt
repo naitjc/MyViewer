@@ -49,12 +49,11 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val token = session.position.sessionId
-    val library by vm.library.collectAsStateWithLifecycle()
-    val book = library.firstOrNull { it.book.id == session.book.id }?.book ?: session.book
     ReadingTimeEffect(vm, token)
     val automatic = remember(token) { AutoReadingState() }
     val pauseAutomatic: () -> Unit = { automatic.stop(); textView?.flush(); vm.flushPosition() }
     val close: () -> Unit = { pauseAutomatic(); vm.closeReader() }
+    val finish: () -> Unit = { pauseAutomatic(); vm.finishReading(token) }
     BackHandler(onBack = close)
     LaunchedEffect(session.preferences.mode) { automatic.stop() }
     DisposableEffect(lifecycle, token) {
@@ -84,6 +83,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                 view.onMenu = { pauseAutomatic(); menu = !menu }
                 view.onPosition = { offset, force -> if (vm.reader.value?.position?.sessionId == token) vm.textPosition(offset, force) }
                 view.onBoundary = { vm.notice.value = it }
+                view.onFinished = finish
                 view.configure(session.text, settings, session.preferences.mode, session.position.textOffset)
             }, modifier = Modifier.fillMaxSize())
             LaunchedEffect(session.jump) { if (session.jump > 0) textView?.goTo(session.jumpOffset) }
@@ -91,9 +91,9 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                 ready = { textView?.readyForAutoReading == true },
                 nextPage = { textView?.nextAutomatically() ?: true },
                 scroll = { textView?.scrollAutomatically(it) ?: true },
-                finished = { vm.notice.value = "已到末尾，自动阅读已停止" },
+                finished = finish,
                 flush = { textView?.flush() })
-        } else if (session.comic != null) ComicContent(vm, session, settings, automatic, { pauseAutomatic(); menu = !menu })
+        } else if (session.comic != null) ComicContent(vm, session, settings, automatic, finish, { pauseAutomatic(); menu = !menu })
 
         if (menu) {
             Surface(Modifier.align(Alignment.TopCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f), shadowElevation = 3.dp) {
@@ -102,10 +102,6 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                     Column(Modifier.weight(1f)) {
                         Text(session.book.title, maxLines = 1, style = MaterialTheme.typography.titleMedium)
                         session.chapter?.let { Text(it.label, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
-                    }
-                    IconButton(onClick = { vm.setCompleted(book, !book.completed) }) {
-                        Icon(if (book.completed) Icons.Outlined.CheckCircle else Icons.Outlined.CheckCircleOutline,
-                            if (book.completed) "取消已读完标记" else "标记已读完")
                     }
                     IconButton(onClick = { sheet = "settings" }) { Icon(Icons.Outlined.Tune, "阅读设置") }
                 }
@@ -132,8 +128,8 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                             IconButton(onClick = { sheet = "bookmarks" }) { Icon(Icons.Outlined.Bookmarks, "手动书签") }
                         } else {
                             if (session.preferences.mode == "PAGE") TextButton(onClick = { vm.direction(if (session.preferences.direction == "LTR") "RTL" else "LTR") }) { Text(if (session.preferences.direction == "LTR") "从左到右" else "从右到左") }
-                            IconButton(onClick = { vm.seekComic(session.position.imageIndex - 1) }) { Icon(Icons.Outlined.SkipPrevious, "上一页") }
-                            IconButton(onClick = { vm.seekComic(session.position.imageIndex + 1) }) { Icon(Icons.Outlined.SkipNext, "下一页") }
+                            IconButton(onClick = { vm.turnComic(false, token) }) { Icon(Icons.Outlined.SkipPrevious, "上一页") }
+                            IconButton(onClick = { vm.turnComic(true, token) }) { Icon(Icons.Outlined.SkipNext, "下一页") }
                         }
                     }
                 }
@@ -245,7 +241,7 @@ private suspend fun prefetchComic(archive: ComicDocument, visible: List<Int>, fo
 }
 
 @Composable
-private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: ReaderSettings, automatic: AutoReadingState, menu: () -> Unit) {
+private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: ReaderSettings, automatic: AutoReadingState, finish: () -> Unit, menu: () -> Unit) {
     val archive = session.comic!!
     val token = session.position.sessionId
     if (session.preferences.mode == "PAGE") {
@@ -258,14 +254,14 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: Re
         }, nextPage = {
             val index = vm.reader.value?.takeIf { it.position.sessionId == token }?.position?.imageIndex ?: archive.imageNames.lastIndex
             if (index >= archive.imageNames.lastIndex) false else { vm.seekComic(index + 1); true }
-        }, finished = { vm.notice.value = "已到末尾，自动阅读已停止" }, flush = vm::flushPosition)
+        }, finished = finish, flush = vm::flushPosition)
         LaunchedEffect(archive, session.position.imageIndex) { prefetchComic(archive, listOf(session.position.imageIndex)) }
         Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { ComicImageView(it) }, update = { view ->
                 view.interactive = true; view.tapToTurn = true
                 view.rtl = session.preferences.direction == "RTL"
                 view.onMenu = menu
-                view.onPage = { next -> vm.reader.value?.takeIf { it.position.sessionId == token && it.preferences.mode == "PAGE" }?.let { vm.seekComic(it.position.imageIndex + if (next) 1 else -1) } }
+                view.onPage = { next -> vm.reader.value?.takeIf { it.position.sessionId == token && it.preferences.mode == "PAGE" }?.let { vm.turnComic(next, token) } }
                 view.onFocus = { ratio -> if (vm.reader.value?.position?.sessionId == token) vm.comicPosition(session.position.imageIndex, ratio, false) }
                 view.onGestureEnd = { if (vm.reader.value?.position?.sessionId == token) vm.flushPosition() }
                 view.onError = { vm.notice.value = it }
@@ -282,11 +278,11 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: Re
         val viewports = remember(archive) { mutableMapOf<Int, ComicViewport>() }
         var restored by remember { mutableStateOf(false) }
         AutoReadingEffect(automatic, "SCROLL", settings,
-            ready = { restored && archive.cachedPage(state.firstVisibleItemIndex) != null },
+            ready = { restored && archive.cachedPage(state.firstVisibleItemIndex) != null && (state.canScrollForward || archive.cachedPage(archive.imageNames.lastIndex) != null) },
             scroll = { distance ->
-                if (state.canScrollForward) state.scrollBy(distance / zoom.scale)
-                state.canScrollForward
-            }, finished = { vm.notice.value = "已到末尾，自动阅读已停止" }, flush = {
+                if (!state.canScrollForward) false
+                else { state.scrollBy(distance / zoom.scale); true }
+            }, finished = finish, flush = {
                 if (restored && vm.reader.value?.position?.sessionId == token) {
                     val index = state.firstVisibleItemIndex
                     val height = sizes[index] ?: state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.size ?: 1
@@ -329,7 +325,9 @@ private fun ComicContent(vm: MainViewModel, session: ReaderSession, settings: Re
                 }
             }
         }
-        ComicZoomSurface(zoom, menu, overflow = { state.dispatchRawDelta(it) }) {
+        ComicZoomSurface(zoom, menu, overflow = { state.dispatchRawDelta(it) },
+            atEnd = { restored && !state.canScrollForward && state.layoutInfo.totalItemsCount == archive.imageNames.size && archive.cachedPage(archive.imageNames.lastIndex) != null },
+            onBeyondEnd = finish) {
             LazyColumn(state = state, userScrollEnabled = !zoom.zoomed, modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(archive.imageNames, key = { _, it -> it }) { index, _ ->
                     val image by rememberComicFile(archive, index)

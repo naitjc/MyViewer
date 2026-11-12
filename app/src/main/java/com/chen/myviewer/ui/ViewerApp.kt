@@ -78,7 +78,7 @@ fun ViewerApp(vm: MainViewModel) {
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var shelfFilter by rememberSaveable { mutableStateOf("全部") }
         var shelfQuery by rememberSaveable { mutableStateOf("") }
-        var expandedSettings by rememberSaveable(stateSaver = SettingsSectionSaver) { mutableStateOf<List<String>>(listOf("layout")) }
+        var expandedSettings by rememberSaveable(stateSaver = SettingsSectionSaver) { mutableStateOf<List<String>>(emptyList()) }
         var lastShelfTap by remember { mutableLongStateOf(-1L) }
         val shelfState = rememberLazyGridState()
         val shelfConfiguration = "${librarySort.name}|$libraryColumns|$shelfFilter|$shelfQuery"
@@ -162,8 +162,8 @@ fun ViewerApp(vm: MainViewModel) {
         } }, confirmButton = { TextButton(onClick = { sourceDialog = false }) { Text("关闭") } })
         importing?.let { ImportDialog(it, vm) }
         if (managing != null) AlertDialog(onDismissRequest = { managing = null }, title = { Text(managing!!.title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            TextButton(onClick = { vm.setCompleted(managing!!, !managing!!.completed); managing = null }) {
-                Text(if (managing!!.completed) "取消已读完标记" else "标记已读完")
+            if (managing!!.completed) TextButton(onClick = { vm.setCompleted(managing!!, false); managing = null }) {
+                Text("取消已读完标记")
             }
             Text(if (managing!!.storage == "ONLINE") "在线漫画" else "${if (managing!!.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (managing!!.storage == "COPY") "应用内副本" else "直接读取"}")
             Text("移出书架后仍保留文件、进度、书签和历史。", style = MaterialTheme.typography.bodySmall)
