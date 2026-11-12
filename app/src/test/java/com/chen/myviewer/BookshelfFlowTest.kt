@@ -167,17 +167,64 @@ class BookshelfFlowTest {
         assertFalse(vm.library.value.single().book.completed)
         compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .9f, height * .5f)) }
         waitForUi { vm.reader.value == null && vm.library.value.single().book.completed }
-        assertTrue(compose.onAllNodesWithText("已读完").fetchSemanticsNodes().isNotEmpty())
+        compose.onNode(hasText("已读完") and hasAnyAncestor(hasScrollToIndexAction())).assertExists()
         compose.onNodeWithText("继续阅读").assertDoesNotExist()
         capture("bookshelf-completed")
         compose.activityRule.scenario.recreate()
-        assertTrue(compose.onAllNodesWithText("已读完").fetchSemanticsNodes().isNotEmpty())
+        compose.onNode(hasText("已读完") and hasAnyAncestor(hasScrollToIndexAction())).assertExists()
         compose.onAllNodesWithText("完读测试").onLast().performTouchInput { longClick(center) }
         compose.onNodeWithText("取消已读完标记").performClick()
         val current = ViewModelProvider(compose.activity)[MainViewModel::class.java]
         waitForUi { !current.library.value.single().book.completed }
-        compose.onNodeWithText("已读完").assertDoesNotExist()
+        compose.onNode(hasText("已读完") and hasAnyAncestor(hasScrollToIndexAction())).assertDoesNotExist()
         compose.onNodeWithText("继续阅读").assertExists()
+    }
+
+    @Test fun completionFilterCombinesWithCategorySearchAndSurvivesReadingAndRecreation() {
+        val vm = ViewModelProvider(compose.activity)[MainViewModel::class.java]
+        val file = File(compose.activity.cacheDir, "filter-story.txt").apply { writeText("第1章\n筛选测试文字。\n".repeat(50)) }
+        runBlocking {
+            val books = listOf(
+                Book("done-text", "山海完读", "TEXT", "DIRECT", Uri.fromFile(file).toString(), completed = true),
+                Book("unread-text", "山海未完", "TEXT", "DIRECT", "file:///unread.txt"),
+                Book("end-text", "另一部未完", "TEXT", "DIRECT", "file:///end.txt"),
+                Book("done-comic", "山海漫画完成", "COMIC", "ONLINE", "myviewer://done", completed = true),
+                Book("unread-comic", "山海漫画未完", "COMIC", "DIRECT", "file:///unread.zip"),
+            )
+            books.forEach { vm.repository.dao.putBook(it) }
+            vm.repository.dao.putPosition(com.chen.myviewer.data.ReadingPosition("end-text", progress = 1f))
+        }
+        waitForUi { vm.library.value.size == 5 }
+        compose.onNodeWithContentDescription("阅读状态：全部状态").assertIsSelected()
+        compose.onNodeWithContentDescription("阅读状态：已读完").performClick()
+        compose.onNodeWithText("2 本书").assertExists()
+        compose.onAllNodesWithText("山海未完").assertCountEquals(0)
+        search().performTextInput("山海"); search().performImeAction()
+        compose.onNodeWithText("小说").performClick()
+        compose.onNodeWithText("找到 1 本书").assertExists()
+        compose.onAllNodesWithText("山海完读").onLast().performClick()
+        waitForUi { vm.reader.value?.text != null }
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        waitForUi { vm.reader.value == null }
+        compose.onNodeWithContentDescription("阅读状态：已读完").assertIsSelected()
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithContentDescription("阅读状态：已读完").assertIsSelected()
+        compose.onNodeWithText("小说").assertIsSelected()
+        search().assertTextContains("山海")
+        capture("bookshelf-completion-filter")
+        compose.onNodeWithContentDescription("清空书名搜索").performClick()
+        compose.onNodeWithText("全部").performClick()
+        compose.onNodeWithContentDescription("阅读状态：未读完").performClick()
+        compose.onNodeWithText("3 本书").assertExists()
+        compose.onAllNodesWithText("另一部未完").onLast().assertIsDisplayed()
+        compose.onNodeWithText("漫画").performClick()
+        compose.onNodeWithText("1 本书").assertExists()
+        val current = ViewModelProvider(compose.activity)[MainViewModel::class.java]
+        runBlocking { current.repository.dao.setCompleted("unread-comic", true) }
+        waitForUi { compose.onNodeWithText("没有符合筛选条件的书籍").isDisplayed() }
+        compose.onNodeWithText("显示全部状态").performClick()
+        compose.onNodeWithContentDescription("阅读状态：全部状态").assertIsSelected()
+        compose.onNodeWithText("2 本书").assertExists()
     }
 
     private fun seedShelf(vm: MainViewModel, count: Int) = runBlocking {

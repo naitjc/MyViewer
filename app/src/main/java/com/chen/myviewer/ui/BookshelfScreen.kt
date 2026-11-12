@@ -29,7 +29,7 @@ import com.chen.myviewer.data.*
 @Composable
 internal fun Bookshelf(
     books: List<LibraryBook>, sort: LibrarySort, onSort: (LibrarySort) -> Unit,
-    filter: String, onFilter: (String) -> Unit, query: String, onQuery: (String) -> Unit,
+    filter: String, onFilter: (String) -> Unit, completion: Boolean?, onCompletion: (Boolean?) -> Unit, query: String, onQuery: (String) -> Unit,
     columns: Int, state: LazyGridState, onTop: () -> Unit,
     open: (Book) -> Unit, manage: (Book) -> Unit, import: () -> Unit,
 ) {
@@ -39,6 +39,7 @@ internal fun Bookshelf(
     val term = query.trim()
     val shown = books.filter {
         (filter == "全部" || (filter == "小说" && it.book.kind == "TEXT") || (filter == "漫画" && it.book.kind == "COMIC")) &&
+            (completion == null || it.book.completed == completion) &&
             (term.isEmpty() || it.book.title.contains(term, ignoreCase = true))
     }.let {
         val stable = compareBy<LibraryBook> { row -> row.book.title }.thenBy { row -> row.book.id }
@@ -78,12 +79,20 @@ internal fun Bookshelf(
                     } }
                 }
             }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(null to "全部状态", false to "未读完", true to "已读完").forEach { (value, label) ->
+                    FilterChip(completion == value, { onCompletion(value) }, label = { Text(label) },
+                        modifier = Modifier.semantics { contentDescription = "阅读状态：$label" })
+                }
+            }
             Text(if (term.isEmpty()) "${shown.size} 本书" else "找到 ${shown.size} 本书", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 6.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (shown.isEmpty()) {
-                if (term.isNotEmpty()) EmptyState("没有找到匹配的书名", "试试书名中的几个字，或换一个分类。", Icons.Outlined.SearchOff) {
+                if (term.isNotEmpty()) EmptyState("没有找到匹配的书名", "试试调整书名、分类或阅读状态。", Icons.Outlined.SearchOff) {
                     OutlinedButton(onClick = { onQuery("") }) { Text("清空搜索") }
+                } else if (completion != null) EmptyState("没有符合筛选条件的书籍", "可以调整分类或阅读状态。", Icons.Outlined.FilterAlt) {
+                    OutlinedButton(onClick = { onCompletion(null) }) { Text("显示全部状态") }
                 } else EmptyState("这个分类还没有书籍。", "可以切换分类，或导入新的书籍。", Icons.Outlined.AutoStories)
             } else {
                 LazyVerticalGrid(state = state, columns = GridCells.Fixed(columns.coerceIn(1, 6)), modifier = Modifier.fillMaxSize(),

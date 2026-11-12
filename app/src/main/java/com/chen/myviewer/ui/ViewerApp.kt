@@ -77,11 +77,12 @@ fun ViewerApp(vm: MainViewModel) {
         val doubleTapTimeout = LocalViewConfiguration.current.doubleTapTimeoutMillis
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var shelfFilter by rememberSaveable { mutableStateOf("全部") }
+        var shelfCompletion by rememberSaveable { mutableStateOf<Boolean?>(null) }
         var shelfQuery by rememberSaveable { mutableStateOf("") }
         var expandedSettings by rememberSaveable(stateSaver = SettingsSectionSaver) { mutableStateOf<List<String>>(emptyList()) }
         var lastShelfTap by remember { mutableLongStateOf(-1L) }
         val shelfState = rememberLazyGridState()
-        val shelfConfiguration = "${librarySort.name}|$libraryColumns|$shelfFilter|$shelfQuery"
+        val shelfConfiguration = "${librarySort.name}|$libraryColumns|$shelfFilter|$shelfCompletion|$shelfQuery"
         var appliedShelfConfiguration by rememberSaveable { mutableStateOf(shelfConfiguration) }
         LaunchedEffect(shelfConfiguration) {
             if (appliedShelfConfiguration != shelfConfiguration) {
@@ -132,7 +133,7 @@ fun ViewerApp(vm: MainViewModel) {
             ) { padding -> Box(Modifier.padding(padding)) {
                 when (tab) {
                     0 -> Bookshelf(books = library.filter { it.book.onShelf }, sort = librarySort, onSort = vm::setLibrarySort,
-                        filter = shelfFilter, onFilter = { shelfFilter = it }, query = shelfQuery, onQuery = { shelfQuery = it },
+                        filter = shelfFilter, onFilter = { shelfFilter = it }, completion = shelfCompletion, onCompletion = { shelfCompletion = it }, query = shelfQuery, onQuery = { shelfQuery = it },
                         columns = libraryColumns, state = shelfState, onTop = returnToTop,
                         open = openBook, manage = { managing = it }, import = { sourceDialog = true })
                     1 -> SourceScreen(sources, vm)

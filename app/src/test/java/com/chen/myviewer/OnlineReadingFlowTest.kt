@@ -84,7 +84,7 @@ class OnlineReadingFlowTest {
         assertEquals(true, runBlocking { vm.repository.dao.chapterPosition(title.book.id, "one") }!!.completed)
         capture("online-chapter-completed")
         compose.onNodeWithText("书库").performClick()
-        compose.onNodeWithText("已读完").assertExists()
+        compose.onNode(hasText("已读完") and hasAnyAncestor(hasScrollToIndexAction())).assertExists()
 
     }
     @Test fun sourceCatalogFiltersLanguagesAndOpensInstalledSourceSettings() {
