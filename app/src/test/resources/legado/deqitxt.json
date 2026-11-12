@@ -1,0 +1,45 @@
+{
+  "bookSourceComment": "得奇小说网 www.deqitxt.com 书源 创建于2026-10-28。",
+  "bookSourceGroup": "通常书源",
+  "bookSourceName": "得奇小说网",
+  "bookSourceType": 0,
+  "bookSourceUrl": "https://www.deqitxt.com",
+  "customButton": false,
+  "customOrder": 6,
+  "enabled": true,
+  "enabledCookieJar": false,
+  "enabledExplore": false,
+  "eventListener": false,
+  "header": "{\"User-Agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36\"}",
+  "lastUpdateTime": 1793280588786,
+  "respondTime": 3941,
+  "ruleBookInfo": {
+    "author": "class.itemtxt@tag.p.1@tag.a@text##作者：",
+    "coverUrl": "class.item@tag.img@src",
+    "intro": "class.des@text",
+    "kind": "class.itemtxt@tag.p.0@tag.span.1@text",
+    "lastChapter": "class.itemtxt@tag.ul.0@tag.li.0@tag.a@text",
+    "name": "class.itemtxt@tag.h1@tag.a@text"
+  },
+  "ruleContent": {
+    "content": "@css:div.con p@text",
+    "nextContentUrl": "@css:div.prenext a:contains(下一页)@href"
+  },
+  "ruleExplore": {},
+  "ruleSearch": {
+    "author": "tag.p.1@tag.a@text##作者：",
+    "bookList": "@css:div.container div.item",
+    "bookUrl": "tag.h3@tag.a@href",
+    "coverUrl": "tag.a@tag.img@src",
+    "kind": "tag.p.0@tag.span.1@text",
+    "lastChapter": "tag.ul@tag.li.0@tag.a@text",
+    "name": "tag.h3@tag.a@text"
+  },
+  "ruleToc": {
+    "chapterList": "id.list@tag.li@tag.a",
+    "chapterName": "text",
+    "chapterUrl": "href"
+  },
+  "searchUrl": "https://www.deqitxt.com/so/so.aspx?key={{key}}",
+  "weight": 0
+}

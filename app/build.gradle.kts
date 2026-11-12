@@ -12,8 +12,8 @@ android {
         applicationId = "com.chen.myviewer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.2.5"
+        versionCode = 18
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -53,9 +53,11 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("com.dylibso.chicory:runtime:1.5.1")
     implementation("org.jsoup:jsoup:1.21.2")
+    implementation("com.jayway.jsonpath:json-path:2.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.mozilla:rhino:1.8.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("androidx.compose.ui:ui-test-junit4")

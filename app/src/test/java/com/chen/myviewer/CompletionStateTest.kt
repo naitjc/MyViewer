@@ -94,7 +94,7 @@ class CompletionStateTest {
             old.version = 3
         }
         fun open() = Room.databaseBuilder(context, ViewerDatabase::class.java, name)
-            .addMigrations(ViewerDatabase.MIGRATION_3_4).allowMainThreadQueries().build()
+            .addMigrations(ViewerDatabase.MIGRATION_3_4, ViewerDatabase.MIGRATION_4_5).allowMainThreadQueries().build()
         val upgraded = open()
         try {
             val dao = upgraded.dao()

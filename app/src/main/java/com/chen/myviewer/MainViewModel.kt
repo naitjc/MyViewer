@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.chen.myviewer.data.*
 import com.chen.myviewer.reader.comic.ComicArchive
 import com.chen.myviewer.reader.comic.ComicDocument
+import com.chen.myviewer.novel.NovelTitle
+import com.chen.myviewer.novel.NovelChapter
 import com.chen.myviewer.source.OnlineComicDocument
 import com.chen.myviewer.source.OnlineTitle
 import com.chen.myviewer.source.SourceChapter
@@ -33,6 +35,8 @@ data class ReaderSession(
     val jumpOffset: Int = 0,
     val onlineTitle: OnlineTitle? = null,
     val chapter: SourceChapter? = null,
+    val novelTitle: NovelTitle? = null,
+    val novelChapter: NovelChapter? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -96,7 +100,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun dismissImport() { if (importing.value?.busy != true) importing.value = null }
 
-    fun open(book: Book, online: OnlineTitle? = null, chapter: SourceChapter? = null) {
+    fun open(book: Book, online: OnlineTitle? = null, chapter: SourceChapter? = null, novel: NovelTitle? = null, novelChapter: NovelChapter? = null) {
+        if (book.storage == "NOVEL" && novel == null) {
+            viewModelScope.launch {
+                try {
+                    val title = app.novels.title(book)
+                    val last = repository.dao.position(book.id)?.chapterKey
+                    val selected = title.novel.chapters.firstOrNull { it.url == last } ?: title.novel.chapters.firstOrNull() ?: error("请刷新小说目录。")
+                    open(book, novel = title, novelChapter = selected)
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error.value = e.message ?: "在线小说暂时无法打开" }
+            }
+            return
+        }
         if (book.storage == "ONLINE" && online == null) {
             viewModelScope.launch {
                 try {
@@ -121,7 +137,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 closeSave?.await()
                 previousPosition?.let { repository.save(it.copy(sequence = it.sequence + 1)) }
                 withContext(Dispatchers.IO) { old?.close() }
-                val text = if (book.kind == "TEXT") repository.loadText(book) else null
+                val text = if (novel != null && novelChapter != null) app.novels.loadChapter(novel, novelChapter) else if (book.kind == "TEXT") repository.loadText(book) else null
                 archive = if (online != null && chapter != null) {
                     OnlineComicDocument(app.sources, online, chapter, app.sources.chapterPages(online, chapter))
                 } else if (book.kind == "COMIC") repository.loadComic(book) else null
@@ -135,6 +151,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         imageEntry = "", imageRatio = saved?.imageRatio ?: 0f, progress = saved?.progress ?: 0f)
                     repository.dao.putPosition(position)
                 }
+                if (novelChapter != null) {
+                    val saved = repository.dao.chapterPosition(book.id, novelChapter.url)
+                    position = position.copy(chapterKey = novelChapter.url, textOffset = saved?.textOffset ?: 0, progress = saved?.progress ?: 0f)
+                    repository.dao.putPosition(position)
+                }
                 if (archive != null) {
                     val index = archive.restoreIndex(position.imageEntry, position.imageIndex)
                     position = position.copy(imageIndex = index, imageEntry = archive.imageNames[index],
@@ -143,7 +164,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (text != null) position = position.copy(textOffset = position.textOffset.coerceIn(0, (text.text.length - 1).coerceAtLeast(0)))
                 sequence = 0L
                 latestComicPosition = null; lastComicPublication = 0L
-                reader.value = ReaderSession(book, position, prefs, text, archive, onlineTitle = online, chapter = chapter)
+                reader.value = ReaderSession(book, position, prefs, text, archive, onlineTitle = online, chapter = chapter, novelTitle = novel, novelChapter = novelChapter)
             } catch (e: CancellationException) { withContext(NonCancellable + Dispatchers.IO) { archive?.close() }; throw e }
             catch (e: Exception) { withContext(Dispatchers.IO) { archive?.close() }; error.value = e.message ?: "书籍暂时无法打开"; failedBook.value = book }
             finally { if (loading.value?.id == book.id) loading.value = null }
@@ -192,7 +213,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun addBookmark() = viewModelScope.launch {
         val session = reader.value ?: return@launch; val doc = session.text ?: return@launch
         val offset = session.position.textOffset
-        repository.dao.putBookmark(Bookmark(UUID.randomUUID().toString(), session.book.id, offset, doc.chapterAt(offset), doc.snippet(offset)))
+        repository.dao.putBookmark(Bookmark(UUID.randomUUID().toString(), session.book.id, offset, doc.chapterAt(offset), doc.snippet(offset), chapterKey = session.position.chapterKey))
         notice.value = "已保存书签"
     }
     fun deleteBookmark(id: String) = viewModelScope.launch { repository.dao.deleteBookmark(id) }
@@ -223,7 +244,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val saved = it.copy(sequence = ++sequence)
             closeSave = viewModelScope.async {
                 try {
-                    if (completed) repository.dao.finishReading(saved, previous?.onlineTitle?.manga?.chapters.orEmpty().map { chapter -> chapter.key })
+                    if (completed) repository.dao.finishReading(saved, previous?.novelTitle?.novel?.chapters?.map { it.url } ?: previous?.onlineTitle?.manga?.chapters.orEmpty().map { chapter -> chapter.key })
                     else repository.save(saved)
                 } catch (error: CancellationException) { throw error }
                 catch (error: Exception) { notice.value = "阅读状态保存失败，请重新打开后重试。" }
@@ -232,7 +253,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         latestComicPosition = null
         reader.value = null; loading.value = null; openJob?.cancel()
         viewModelScope.launch(Dispatchers.IO) { previous?.comic?.close() }
-        if (completed) notice.value = if (previous?.chapter != null) "本章已读完" else "已读完"
+        if (completed) notice.value = if (previous?.chapter != null || previous?.novelChapter != null) "本章已读完" else "已读完"
     }
     fun updateSettings(value: ReaderSettings) = viewModelScope.launch { app.settings.update(value) }
     fun setLibrarySort(value: LibrarySort) = viewModelScope.launch { app.settings.setLibrarySort(value) }

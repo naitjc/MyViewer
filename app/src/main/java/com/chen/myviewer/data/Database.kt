@@ -46,6 +46,7 @@ data class ChapterPosition(
     val imageRatio: Float,
     val progress: Float,
     val completed: Boolean? = null,
+    @ColumnInfo(defaultValue = "0") val textOffset: Int = 0,
 )
 
 @Entity(tableName = "book_preferences", foreignKeys = [ForeignKey(entity = Book::class, parentColumns = ["id"], childColumns = ["bookId"], onDelete = ForeignKey.CASCADE)])
@@ -64,6 +65,7 @@ data class Bookmark(
     val snippet: String,
     val note: String = "",
     val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "''") val chapterKey: String = "",
 )
 
 @Entity(tableName = "folders")
@@ -106,7 +108,7 @@ interface ViewerDao {
     suspend fun chapterPosition(bookId: String, chapterKey: String): ChapterPosition?
     @Query("SELECT * FROM chapter_positions WHERE bookId=:bookId")
     fun chapterPositions(bookId: String): Flow<List<ChapterPosition>>
-    @Query("INSERT OR REPLACE INTO chapter_positions (bookId,chapterKey,imageIndex,imageRatio,progress,completed) SELECT bookId,chapterKey,imageIndex,imageRatio,progress,(SELECT completed FROM chapter_positions AS saved WHERE saved.bookId=positions.bookId AND saved.chapterKey=positions.chapterKey) FROM positions WHERE bookId=:bookId AND sessionId=:sessionId AND sequence=:sequence AND chapterKey<>''")
+    @Query("INSERT OR REPLACE INTO chapter_positions (bookId,chapterKey,imageIndex,imageRatio,progress,textOffset,completed) SELECT bookId,chapterKey,imageIndex,imageRatio,progress,textOffset,(SELECT completed FROM chapter_positions AS saved WHERE saved.bookId=positions.bookId AND saved.chapterKey=positions.chapterKey) FROM positions WHERE bookId=:bookId AND sessionId=:sessionId AND sequence=:sequence AND chapterKey<>''")
     suspend fun snapshotChapter(bookId: String, sessionId: String, sequence: Long)
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertChapterIfAbsent(position: ChapterPosition)
@@ -138,6 +140,9 @@ interface ViewerDao {
     @Query("SELECT * FROM book_preferences WHERE bookId=:id") suspend fun preferences(id: String): BookPreferences?
     @Upsert suspend fun putPreferences(preferences: BookPreferences)
     @Query("SELECT * FROM bookmarks WHERE bookId=:id ORDER BY offset") fun bookmarks(id: String): Flow<List<Bookmark>>
+    @Query("SELECT * FROM bookmarks WHERE bookId=:id AND chapterKey=:chapterKey ORDER BY offset")
+    fun chapterBookmarks(id: String, chapterKey: String): Flow<List<Bookmark>>
+    @Query("UPDATE books SET coverPath=:path WHERE id=:id") suspend fun cover(id: String, path: String)
     @Upsert suspend fun putBookmark(bookmark: Bookmark)
     @Query("DELETE FROM bookmarks WHERE id=:id") suspend fun deleteBookmark(id: String)
     @Query("SELECT * FROM folders ORDER BY name") fun folders(): Flow<List<FolderSource>>
@@ -158,10 +163,16 @@ interface ViewerDao {
     fun observeBookReadingTimes(): Flow<List<BookReadingTime>>
 }
 
-@Database(entities = [Book::class, ReadingPosition::class, ChapterPosition::class, BookPreferences::class, Bookmark::class, FolderSource::class, ReadingTimeRecord::class], version = 4, exportSchema = true)
+@Database(entities = [Book::class, ReadingPosition::class, ChapterPosition::class, BookPreferences::class, Bookmark::class, FolderSource::class, ReadingTimeRecord::class], version = 5, exportSchema = true)
 abstract class ViewerDatabase : RoomDatabase() {
     abstract fun dao(): ViewerDao
     companion object {
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chapter_positions ADD COLUMN textOffset INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE bookmarks ADD COLUMN chapterKey TEXT NOT NULL DEFAULT ''")
+            }
+        }
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE books ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")

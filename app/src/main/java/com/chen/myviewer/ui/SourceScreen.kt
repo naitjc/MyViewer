@@ -38,7 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SourceScreen(vm: SourceViewModel, reader: MainViewModel) {
+fun SourceScreen(vm: SourceViewModel, reader: MainViewModel, catalogHeader: @Composable () -> Unit = {}) {
     val state by vm.state.collectAsStateWithLifecycle()
     var repositoryDialog by remember { mutableStateOf(false) }
     var settingsSource by remember { mutableStateOf<String?>(null) }
@@ -74,7 +74,7 @@ fun SourceScreen(vm: SourceViewModel, reader: MainViewModel) {
         when {
             state.detail != null -> MangaDetails(vm, reader, state)
             state.source != null -> SourceSearch(vm, state)
-            else -> SourceCatalog(vm, state, { repositoryUrl = state.repositoryUrl; repositoryDialog = true })
+            else -> SourceCatalog(vm, state, { repositoryUrl = state.repositoryUrl; repositoryDialog = true }, catalogHeader)
         }
     }
     if (repositoryDialog) AlertDialog(onDismissRequest = { repositoryDialog = false }, title = { Text("漫画源仓库") }, text = {
@@ -83,7 +83,7 @@ fun SourceScreen(vm: SourceViewModel, reader: MainViewModel) {
 }
 
 @Composable
-private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, repository: () -> Unit) {
+private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, repository: () -> Unit, catalogHeader: @Composable () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var languageMenu by remember { mutableStateOf(false) }
     var removingSource by remember { mutableStateOf<SourceEntry?>(null) }
@@ -96,11 +96,12 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
     val otherLanguages = languages.filterNot { it in commonLanguages }
     LaunchedEffect(state.busy) { if (state.catalog.isEmpty() && state.busy == null && state.error == null) vm.loadCatalog() }
     Column {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("发现", Modifier.weight(1f).clearAndSetSemantics { contentDescription = "发现"; heading() }, style = MaterialTheme.typography.headlineSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
             IconButton(onClick = { vm.loadCatalog(true) }, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新源仓库") }
             IconButton(onClick = repository) { Icon(Icons.Outlined.Settings, "管理源仓库") }
         }
+        catalogHeader()
         OutlinedTextField(query, { query = it }, placeholder = { Text("搜索漫画源") }, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
             colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)), singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), leadingIcon = { Icon(Icons.Outlined.Search, null) })
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
