@@ -33,6 +33,9 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -50,8 +53,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.time.LocalDate
 
-private val Green = Color(0xFF315B48)
-private val LightColors = lightColorScheme(primary = Green, secondary = Color(0xFF63765C), primaryContainer = Color(0xFFDCE9DF), onPrimaryContainer = Color(0xFF173B28), secondaryContainer = Color(0xFFE0E8DA), onSecondaryContainer = Color(0xFF24362B), tertiaryContainer = Color(0xFFE7E6DB), onTertiaryContainer = Color(0xFF3E4433), background = Color(0xFFFAF9F6), surface = Color(0xFFFAF9F6), surfaceContainer = Color(0xFFEFF1E9), onSurface = Color(0xFF24332D))
+private val Green = Color(0xFF355E4B)
+private val LightColors = lightColorScheme(primary = Green, secondary = Color(0xFF63765C), primaryContainer = Color(0xFFDCE9DF), onPrimaryContainer = Color(0xFF173B28), secondaryContainer = Color(0xFFE0E8DA), onSecondaryContainer = Color(0xFF24362B), tertiaryContainer = Color(0xFFE7E6DB), onTertiaryContainer = Color(0xFF3E4433), background = Color(0xFFFAF9F6), surface = Color(0xFFFAF9F6), surfaceContainer = Color(0xFFEFEFEA), onSurface = Color(0xFF24332D))
 private val DarkColors = darkColorScheme(primary = Color(0xFFA8CAB2), primaryContainer = Color(0xFF2B4838), onPrimaryContainer = Color(0xFFD4ECD9), secondaryContainer = Color(0xFF334638), onSecondaryContainer = Color(0xFFDCE9DF), tertiaryContainer = Color(0xFF414539), onTertiaryContainer = Color(0xFFE7E6DB), background = Color(0xFF171D1A), surface = Color(0xFF171D1A), surfaceContainer = Color(0xFF263229), onSurface = Color(0xFFDEE6DE), onSurfaceVariant = Color(0xFFB8C5B9), outlineVariant = Color(0xFF3F4B42))
 private val SettingsSectionSaver = listSaver<List<String>, String>(save = { it }, restore = { it.toList() })
 
@@ -59,6 +62,7 @@ private val SettingsSectionSaver = listSaver<List<String>, String>(save = { it }
 fun ViewerApp(vm: MainViewModel) {
     val sources: com.chen.myviewer.source.SourceViewModel = viewModel()
     MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors) {
+        val sourceState by sources.state.collectAsStateWithLifecycle()
         val library by vm.library.collectAsStateWithLifecycle()
         val reader by vm.reader.collectAsStateWithLifecycle()
         StatusBarAppearance(if (reader?.book?.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface)
@@ -111,10 +115,10 @@ fun ViewerApp(vm: MainViewModel) {
             if (reader != null) key(reader!!.position.sessionId) { ReaderScreen(vm, reader!!, settings, snackbar) }
             else Scaffold(
                 snackbarHost = { SnackbarHost(snackbar) },
-                topBar = { TopAppBar(title = { Column { Text("MYVIEWER", fontSize = 10.sp, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(listOf("我的书库", "发现漫画", "最近阅读", "偏好设置")[tab], fontWeight = FontWeight.Medium) } }, actions = {
-                    if (tab == 0) IconButton(onClick = { sourceDialog = true }) { Icon(Icons.Outlined.Add, "导入书籍") }
+                topBar = { if (tab != 1 || sourceState.source != null || sourceState.detail != null) TopAppBar(title = { Text(listOf("书库", "发现", "历史", "设置")[tab], fontWeight = FontWeight.Bold, modifier = Modifier.clearAndSetSemantics { contentDescription = listOf("书库", "发现", "历史", "设置")[tab]; heading() }) }, actions = {
+                    if (tab == 0) TextButton(onClick = { sourceDialog = true }, modifier = Modifier.semantics { contentDescription = "导入书籍" }) { Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(4.dp)); Text("导入") }
                 }) },
-                bottomBar = { NavigationBar {
+                bottomBar = { NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                     val icons = listOf(Icons.Outlined.AutoStories, Icons.Outlined.Public, Icons.Outlined.History, Icons.Outlined.Tune)
                     listOf("书库", "发现", "历史", "设置").forEachIndexed { index, label -> NavigationBarItem(
                         selected = tab == index,
@@ -128,6 +132,7 @@ fun ViewerApp(vm: MainViewModel) {
                             tab = index
                         },
                         modifier = if (index == 0) Modifier.semantics { customActions = listOf(CustomAccessibilityAction("回到书库顶部") { tab = 0; returnToTop(); true }) } else Modifier,
+                        colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surface, selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary),
                         icon = { Icon(icons[index], label) }, label = { Text(label) }) }
                 } },
             ) { padding -> Box(Modifier.padding(padding)) {

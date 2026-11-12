@@ -60,7 +60,7 @@ internal fun Bookshelf(
         Column(Modifier.padding(horizontal = 20.dp).padding(top = 12.dp)) {
             OutlinedTextField(query, onQuery,
                 modifier = Modifier.fillMaxWidth().semantics { contentDescription = "搜索书名" },
-                singleLine = true, shape = RoundedCornerShape(18.dp),
+                singleLine = true, shape = RoundedCornerShape(24.dp),
                 placeholder = { Text("搜索书名") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
                 trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQuery("") }) { Icon(Icons.Outlined.Close, "清空书名搜索") } },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -68,7 +68,7 @@ internal fun Bookshelf(
                 colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("全部", "小说", "漫画").forEach { label ->
-                    FilterChip(filter == label, { onFilter(label) }, label = { Text(label) })
+                    FilterChip(filter == label, { onFilter(label) }, label = { Text(label) }, shape = RoundedCornerShape(50), colors = shelfChipColors())
                 }
                 Spacer(Modifier.weight(1f))
                 Box {
@@ -81,7 +81,7 @@ internal fun Bookshelf(
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(null to "全部状态", false to "未读完", true to "已读完").forEach { (value, label) ->
-                    FilterChip(completion == value, { onCompletion(value) }, label = { Text(label) },
+                    FilterChip(completion == value, { onCompletion(value) }, label = { Text(label) }, shape = RoundedCornerShape(50), colors = shelfChipColors(),
                         modifier = Modifier.semantics { contentDescription = "阅读状态：$label" })
                 }
             }
@@ -120,22 +120,28 @@ internal fun Bookshelf(
 }
 
 @Composable
+internal fun shelfChipColors() = FilterChipDefaults.filterChipColors(
+    selectedContainerColor = MaterialTheme.colorScheme.primary,
+    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+    selectedTrailingIconColor = MaterialTheme.colorScheme.onPrimary,
+)
+
+@Composable
 internal fun ResumeBookCard(row: LibraryBook, open: () -> Unit, subtitle: String? = null) {
-    Surface(onClick = open, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Outlined.AutoStories, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
-                Text(if (row.book.completed) "再次阅读" else "继续阅读", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.weight(1f)); Icon(Icons.Outlined.ArrowForward, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.primary)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                BookCover(row.book, Modifier.width(64.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text(row.book.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("${if (row.book.kind == "TEXT") "TXT 小说" else if (row.book.storage == "ONLINE") "在线漫画" else "ZIP 漫画"} · ${progressLabel(row)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .75f))
-                    LinearProgressIndicator(progress = { (row.position?.progress ?: 0f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.primary.copy(alpha = .12f))
-                    subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .65f)) }
+    Surface(onClick = open, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            BookCover(row.book, Modifier.width(42.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(row.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (row.book.completed) "再次阅读" else "继续阅读", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text(progressLabel(row), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
+                LinearProgressIndicator(progress = { (row.position?.progress ?: 0f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.primary.copy(alpha = .12f))
+                subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+            }
+            Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) {
+                Icon(Icons.Outlined.PlayArrow, null, Modifier.padding(8.dp).size(20.dp), tint = MaterialTheme.colorScheme.onPrimary)
             }
         }
     }

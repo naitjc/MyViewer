@@ -20,6 +20,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -92,20 +96,21 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
     val otherLanguages = languages.filterNot { it in commonLanguages }
     LaunchedEffect(state.busy) { if (state.catalog.isEmpty() && state.busy == null && state.error == null) vm.loadCatalog() }
     Column {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("漫画源", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("发现", Modifier.weight(1f).clearAndSetSemantics { contentDescription = "发现"; heading() }, style = MaterialTheme.typography.headlineSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
             IconButton(onClick = { vm.loadCatalog(true) }, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新源仓库") }
             IconButton(onClick = repository) { Icon(Icons.Outlined.Settings, "管理源仓库") }
         }
-        OutlinedTextField(query, { query = it }, label = { Text("搜索漫画源") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), leadingIcon = { Icon(Icons.Outlined.Search, null) })
+        OutlinedTextField(query, { query = it }, placeholder = { Text("搜索漫画源") }, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+            colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)), singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), leadingIcon = { Icon(Icons.Outlined.Search, null) })
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(state.language.isEmpty(), { vm.language("") }, label = { Text("全部语言") })
+            FilterChip(state.language.isEmpty(), { vm.language("") }, label = { Text("全部语言") }, shape = androidx.compose.foundation.shape.RoundedCornerShape(50), colors = shelfChipColors())
             commonLanguages.filter { it == "zh" || it in languages }.forEach { language ->
-                FilterChip(state.language == language, { vm.language(language) }, label = { Text(sourceLanguageLabel(language)) })
+                FilterChip(state.language == language, { vm.language(language) }, label = { Text(sourceLanguageLabel(language)) }, shape = androidx.compose.foundation.shape.RoundedCornerShape(50), colors = shelfChipColors())
             }
             if (otherLanguages.isNotEmpty()) Box {
                 val selected = state.language in otherLanguages
-                FilterChip(selected, { languageMenu = true },
+                FilterChip(selected, { languageMenu = true }, shape = androidx.compose.foundation.shape.RoundedCornerShape(50), colors = shelfChipColors(),
                     label = { Text(if (selected) sourceLanguageLabel(state.language) else "更多语言") },
                     trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null) })
                 DropdownMenu(languageMenu, { languageMenu = false }, modifier = Modifier.heightIn(max = 360.dp)) {
@@ -131,13 +136,17 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
             items(entries, key = { it.id }) { entry ->
                 val local = installed[entry.id]
                 Row(Modifier.fillMaxWidth().clickable(enabled = local != null && state.busy == null) { vm.choose(local!!.entry) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                        Icon(Icons.Outlined.Public, null, Modifier.padding(10.dp).size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(entry.name, style = MaterialTheme.typography.titleMedium)
                         Text("${entry.languages.joinToString(" / ")} · v${entry.version}${if (local != null) " · 已安装" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (local == null) FilledTonalButton(onClick = { vm.install(entry) }, enabled = state.busy == null) { Text("安装") }
                     else if (local.entry.version < entry.version) TextButton(onClick = { vm.install(entry) }, enabled = state.busy == null) { Text("更新") }
-                    else IconButton(onClick = { vm.choose(local.entry) }, enabled = state.busy == null) { Icon(Icons.Outlined.Search, "浏览 ${entry.name}") }
+                    else TextButton(onClick = { vm.choose(local.entry) }, enabled = state.busy == null, modifier = Modifier.semantics { contentDescription = "浏览 ${entry.name}" }) { Text("浏览") }
                     if (local != null) IconButton(onClick = { removingSource = local.entry }, enabled = state.busy == null) {
                         Icon(Icons.Outlined.DeleteOutline, "卸载 ${entry.name}")
                     }

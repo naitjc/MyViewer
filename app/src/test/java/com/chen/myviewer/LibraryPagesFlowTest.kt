@@ -58,7 +58,7 @@ class LibraryPagesFlowTest {
         assertEquals(6, vm.library.value.count { it.book.onShelf })
         capture("history-empty-redesign")
         compose.onNodeWithText("设置").performClick()
-        waitForUi { compose.onNodeWithText("每行书籍数量").isDisplayed() }
+        waitForUi { compose.onNodeWithContentDescription("书架布局分组").isDisplayed() }
         capture("settings-redesign")
         expandSection("小说阅读")
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("阅读预览"))
@@ -80,7 +80,7 @@ class LibraryPagesFlowTest {
         waitForUi { compose.onNodeWithText("阅读记录").isDisplayed() }
         capture("history-redesign-dark")
         compose.onNodeWithText("设置").performClick()
-        waitForUi { compose.onNodeWithText("每行书籍数量").isDisplayed() }
+        waitForUi { compose.onNodeWithContentDescription("书架布局分组").isDisplayed() }
         capture("settings-redesign-dark")
         expandSection("小说阅读")
         compose.onNodeWithText("阅读预览").performScrollTo()
@@ -89,7 +89,7 @@ class LibraryPagesFlowTest {
 
     @Test fun settingsGroupsToggleIndependentlyAndKeepStateAcrossNavigation() {
         compose.onNodeWithText("设置").performClick()
-        waitForUi { compose.onNodeWithText("每行书籍数量").isDisplayed() }
+        waitForUi { compose.onNodeWithContentDescription("书架布局分组").isDisplayed() }
         assertSection("书架布局", false)
         assertSection("小说阅读", false)
         compose.onNodeWithText("阅读预览").assertDoesNotExist()

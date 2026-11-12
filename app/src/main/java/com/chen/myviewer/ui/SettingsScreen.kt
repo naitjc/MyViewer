@@ -7,11 +7,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -35,20 +33,9 @@ import com.chen.myviewer.data.ReaderSettings
 @Composable
 internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns: Int, onColumns: (Int) -> Unit, expanded: List<String>, onToggleSection: (String) -> Unit) {
     val folders by vm.folders.collectAsStateWithLifecycle()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item(key = "summary") {
-            Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Icon(Icons.Outlined.Tune, null, Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("阅读偏好", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        Text("每行 $columns 本 · 阅读样式自动保存", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .75f))
-                    }
-                }
-            }
-        }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp)) {
         item(key = "layout") {
-            PreferenceCard("书架布局", "每行书籍数量", Icons.Outlined.GridView, "layout" in expanded, { onToggleSection("layout") }) {
+            PreferenceCard("书架布局", "每行 $columns 本", Icons.Outlined.GridView, "layout" in expanded, { onToggleSection("layout") }) {
                 for (row in listOf(1..3, 4..6)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { count -> FilterChip(selected = columns == count, onClick = { onColumns(count) },
@@ -98,13 +85,9 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
             }
         }
         item(key = "about") {
-            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Outlined.AutoStories, null, Modifier.size(25.dp), tint = MaterialTheme.colorScheme.primary)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("MYVIEWER", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                    Text("TXT 小说 · ZIP 与在线漫画", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            PreferenceCard("关于 MyViewer", "版本 ${BuildConfig.VERSION_NAME}", Icons.Outlined.Info, "about" in expanded, { onToggleSection("about") }) {
+                Text("TXT 小说 · ZIP 与在线漫画", style = MaterialTheme.typography.bodyMedium)
+                Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -113,13 +96,13 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
 @Composable
 private fun PreferenceCard(title: String, subtitle: String, icon: ImageVector, expanded: Boolean, onToggle: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(180), label = "设置分组箭头")
-    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = .045f))) {
+    Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
         Column {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
             Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = if (expanded) "收起$title" else "展开$title", onClick = onToggle)
-                .semantics { contentDescription = "${title}分组"; stateDescription = if (expanded) "已展开" else "已收起" }.padding(18.dp),
+                .semantics { contentDescription = "${title}分组"; stateDescription = if (expanded) "已展开" else "已收起" }.padding(vertical = 16.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .1f)) { Icon(icon, null, Modifier.padding(10.dp).size(20.dp), tint = MaterialTheme.colorScheme.primary) }
+                Icon(icon, null, Modifier.padding(end = 4.dp).size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
