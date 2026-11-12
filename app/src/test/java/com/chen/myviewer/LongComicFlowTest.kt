@@ -34,8 +34,10 @@ class LongComicFlowTest {
         waitForUi { hasNoBlankBands(frame()) }
         compose.onRoot().performTouchInput { click(center) }
         shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
-        waitForUi { compose.onAllNodesWithText("切换翻页").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("切换翻页").performClick()
+        waitForUi { compose.onAllNodesWithContentDescription("阅读设置").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("阅读设置").performClick()
+        compose.onNodeWithText("翻页").performClick()
+        compose.onNodeWithContentDescription("关闭面板").performClick()
         waitForUi { vm.reader.value!!.preferences.mode == "PAGE" }
         compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .9f, centerY)) }
         shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(400))

@@ -50,7 +50,12 @@ class ComicFlowTest {
         waitForUi { vm.reader.value!!.position.imageIndex > 0 }
         compose.onRoot().performTouchInput { click(center) }
         shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
-        compose.onNodeWithText("切换连续").performClick()
+        compose.onNodeWithContentDescription("阅读设置").performClick()
+        compose.onNodeWithText("字号").assertDoesNotExist()
+        compose.onNodeWithText("阅读方向").assertExists()
+        capture("comic-reader-settings")
+        compose.onNodeWithText("连续").performClick()
+        compose.onNodeWithContentDescription("关闭面板").performClick()
         waitForUi { vm.reader.value!!.preferences.mode == "SCROLL" }
         frame(); capture("comic-continuous")
         zoom(100).assertExists()

@@ -129,7 +129,11 @@ class AutoReadingFlowTest {
         assertEquals(paged, vm.reader.value!!.position.textOffset)
 
         showMenu()
-        compose.onNodeWithText("切换连续").performClick()
+        compose.onNodeWithContentDescription("阅读设置").performClick()
+        advance(500)
+        compose.onNodeWithText("连续").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("关闭面板").performClick()
+        advance(500)
         waitForUi { vm.reader.value!!.preferences.mode == "SCROLL" }
         openControls(); startFromControls()
         advance(1800)

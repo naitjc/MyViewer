@@ -52,7 +52,16 @@ class AppFlowTest {
         assertNull("Reader open error: ${vm.error.value}", vm.error.value)
         compose.waitForIdle()
         compose.onRoot().performTouchInput { click(center) }
-        compose.onNodeWithText("切换连续").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("阅读进度滑杆").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(.3f) }
+        waitForUi { vm.reader.value!!.position.progress > .2f }
+        capture("novel-reader-menu")
+        compose.onNodeWithContentDescription("阅读设置").performClick()
+        val originalFontSize = vm.settings.value.fontSize
+        compose.onNodeWithContentDescription("增大字号").performScrollTo().performClick()
+        waitForUi { vm.settings.value.fontSize == originalFontSize + 1f }
+        capture("novel-reader-settings")
+        compose.onNodeWithText("连续").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("关闭面板").performClick()
         waitForUi { vm.reader.value?.preferences?.mode == "SCROLL" }
         compose.onRoot().performTouchInput { click(center) }
         compose.onRoot().performTouchInput { swipeUp() }

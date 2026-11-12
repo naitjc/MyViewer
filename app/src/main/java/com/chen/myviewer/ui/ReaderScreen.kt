@@ -16,6 +16,9 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -71,7 +74,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
         window?.let { if (it.attributes.screenBrightness != settings.brightness) it.attributes = it.attributes.apply { screenBrightness = settings.brightness } }
     }
 
-    Box(Modifier.fillMaxSize().background(if (session.book.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface).windowInsetsPadding(WindowInsets.safeDrawing).pointerInput(automatic) {
+    Box(Modifier.fillMaxSize().then(if (sheet != null) Modifier.clearAndSetSemantics { } else Modifier).background(if (session.book.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface).windowInsetsPadding(WindowInsets.safeDrawing).pointerInput(automatic) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             if (automatic.running) pauseAutomatic()
@@ -96,17 +99,18 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
         } else if (session.comic != null) ComicContent(vm, session, settings, automatic, finish, { pauseAutomatic(); menu = !menu })
 
         if (menu) {
-            Surface(Modifier.align(Alignment.TopCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f), shadowElevation = 3.dp) {
+            MaterialTheme(colorScheme = if (session.comic != null) darkColorScheme(primary = Color(0xFFA8CAB2), surface = Color(0xFF171D1A), onSurface = Color.White) else MaterialTheme.colorScheme) {
+            Surface(Modifier.align(Alignment.TopCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f), contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = 3.dp) {
                 Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = close) { Icon(Icons.Outlined.ArrowBack, "返回书架") }
                     Column(Modifier.weight(1f)) {
                         Text(session.book.title, maxLines = 1, style = MaterialTheme.typography.titleMedium)
                         session.chapter?.let { Text(it.label, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
                     }
-                    IconButton(onClick = { sheet = "settings" }) { Icon(Icons.Outlined.Tune, "阅读设置") }
+                    if (session.text != null) IconButton(onClick = { sheet = "bookmarks" }) { Icon(Icons.Outlined.BookmarkBorder, "查看书签") }
                 }
             }
-            Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), shadowElevation = 5.dp) {
+            Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = 5.dp) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     session.onlineTitle?.let { title ->
                         val chapters = title.manga.chapters.orEmpty().asReversed()
@@ -117,22 +121,30 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                             TextButton(onClick = { pauseAutomatic(); vm.open(title.book, title, chapters[current + 1]) }, enabled = current >= 0 && current < chapters.lastIndex) { Text("下一章") }
                         }
                     }
-                    TextButton(onClick = { sheet = "jump" }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (session.text != null) "${session.text.chapterAt(session.position.textOffset)} · ${(session.position.progress * 100).toInt()}%" else "第 ${session.position.imageIndex + 1} / ${session.comic!!.imageNames.size} 页 · 点击跳转")
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { if (session.comic != null) menu = false; vm.mode(if (session.preferences.mode == "PAGE") "SCROLL" else "PAGE") }) { Text(if (session.preferences.mode == "PAGE") "切换连续" else "切换翻页") }
-                        IconButton(onClick = { sheet = "automatic" }) { Icon(Icons.Outlined.PlayCircleOutline, "自动阅读") }
-                        if (session.text != null) {
-                            IconButton(onClick = { sheet = "chapters" }) { Icon(Icons.Outlined.FormatListBulleted, "章节目录") }
-                            IconButton(onClick = { sheet = "bookmarks" }) { Icon(Icons.Outlined.Bookmarks, "手动书签") }
-                        } else {
-                            if (session.preferences.mode == "PAGE") TextButton(onClick = { vm.direction(if (session.preferences.direction == "LTR") "RTL" else "LTR") }) { Text(if (session.preferences.direction == "LTR") "从左到右" else "从右到左") }
-                            IconButton(onClick = { vm.turnComic(false, token) }) { Icon(Icons.Outlined.SkipPrevious, "上一页") }
-                            IconButton(onClick = { vm.turnComic(true, token) }) { Icon(Icons.Outlined.SkipNext, "下一页") }
+                    if (session.text != null) {
+                        val chapters = session.text.chapters
+                        val current = chapters.indexOfLast { it.offset <= session.position.textOffset }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            TextButton(onClick = { vm.seekText(chapters[current - 1].offset) }, enabled = current > 0) { Text("上一章") }
+                            TextButton(onClick = { sheet = "chapters" }, modifier = Modifier.weight(1f)) { Text(session.text.chapterAt(session.position.textOffset), maxLines = 1) }
+                            TextButton(onClick = { vm.seekText(chapters[current + 1].offset) }, enabled = current < chapters.lastIndex) { Text("下一章") }
                         }
                     }
+                    ReaderProgress(session) { value ->
+                        if (session.text != null) vm.seekText((value * (session.text.text.length - 1).coerceAtLeast(0)).toInt())
+                        else vm.seekComic((value * (session.comic!!.imageNames.size - 1)).toInt())
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        if (session.text != null) {
+                            ReaderAction(Icons.Outlined.FormatListBulleted, "目录", "章节目录") { sheet = "chapters" }
+                            ReaderAction(Icons.Outlined.Bookmarks, "书签", "手动书签") { sheet = "bookmarks" }
+                        } else ReaderAction(Icons.Outlined.Numbers, "页码", "阅读进度") { sheet = "jump" }
+                        ReaderAction(Icons.Outlined.PlayArrow, "自动阅读", "自动阅读") { sheet = "automatic" }
+                        ReaderAction(Icons.Outlined.Settings, "设置", "阅读设置") { sheet = "settings" }
+                    }
                 }
+            }
             }
         }
         if (automatic.running) {
@@ -143,7 +155,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (menu) 140.dp else 16.dp))
     }
     sheet?.let { active ->
-        ModalBottomSheet(onDismissRequest = { sheet = null }) {
+        ModalBottomSheet(onDismissRequest = { sheet = null }, containerColor = MaterialTheme.colorScheme.surface, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).navigationBarsPadding()) {
                 when (active) {
                     "online-chapters" -> {
@@ -161,14 +173,28 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         menu = false; sheet = null; automatic.start()
                     }
                     "settings" -> {
-                        Text("阅读设置", style = MaterialTheme.typography.titleLarge)
-                        Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(vertical = 16.dp)) {
-                            ReadingSettings(settings, vm::updateSettings)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (session.text != null) "阅读设置" else "漫画设置", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                            IconButton(onClick = { sheet = null }) { Icon(Icons.Outlined.Close, "关闭面板") }
+                        }
+                        Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (session.text != null) {
-                                Spacer(Modifier.height(16.dp)); Text("TXT 编码 · 当前 ${session.text.encoding}")
-                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("AUTO" to "自动", "UTF-8" to "UTF-8", "GB18030" to "GB18030", "UTF-16LE" to "UTF-16LE").forEach { (id, label) ->
-                                    FilterChip(session.book.encoding == id, { textView?.flush(); sheet = null; vm.encoding(id) }, label = { Text(label) })
-                                } }
+                                ReadingSettings(settings, vm::updateSettings, session.preferences.mode, vm::mode)
+                                var more by remember { mutableStateOf(false) }
+                                TextButton(onClick = { more = !more }) { Text("更多设置") }
+                                if (more) {
+                                    Text("TXT 编码 · 当前 ${session.text.encoding}")
+                                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("AUTO" to "自动", "UTF-8" to "UTF-8", "GB18030" to "GB18030", "UTF-16LE" to "UTF-16LE").forEach { (id, label) ->
+                                        FilterChip(session.book.encoding == id, { textView?.flush(); sheet = null; vm.encoding(id) }, label = { Text(label) })
+                                    } }
+                                }
+                            } else {
+                                ReaderChoice("阅读方式", listOf("PAGE" to "翻页", "SCROLL" to "连续"), session.preferences.mode, vm::mode)
+                                if (session.preferences.mode == "PAGE") ReaderChoice("阅读方向", listOf("LTR" to "从左到右", "RTL" to "从右到左"), session.preferences.direction, vm::direction)
+                                BrightnessSettings(settings, vm::updateSettings)
+                                HorizontalDivider()
+                                TextButton(onClick = { sheet = "jump" }, modifier = Modifier.fillMaxWidth()) { Text("当前页 · ${session.position.imageIndex + 1} / ${session.comic!!.imageNames.size}") }
+                                TextButton(onClick = { sheet = "automatic" }, modifier = Modifier.fillMaxWidth()) { Text("自动阅读") }
                             }
                         }
                     }
@@ -195,12 +221,10 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         var value by remember { mutableFloatStateOf(if (session.text != null) session.position.progress else session.position.imageIndex.toFloat() / (session.comic!!.imageNames.size - 1).coerceAtLeast(1)) }
                         Text("阅读进度", style = MaterialTheme.typography.titleLarge)
                         Text(if (session.text != null) "${(value * 100).toInt()}%" else "第 ${(value * (session.comic!!.imageNames.size - 1)).toInt() + 1} 页", Modifier.padding(top = 20.dp))
-                        Slider(value, { value = it })
-                        Button(onClick = {
+                        ReaderSlider(value, { value = it }, valueLabel = if (session.text != null) "${(value * 100).toInt()}%" else "${(value * (session.comic!!.imageNames.size - 1)).toInt() + 1}", onFinished = {
                             if (session.text != null) vm.seekText((value * (session.text.text.length - 1).coerceAtLeast(0)).toInt())
                             else vm.seekComic((value * (session.comic!!.imageNames.size - 1)).toInt())
-                            sheet = null; menu = false
-                        }, modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) { Text("跳转") }
+                        })
                     }
                 }
             }
@@ -354,5 +378,28 @@ private fun ComicPlaceholder(error: String?, modifier: Modifier, retry: (() -> U
             Text(error, Modifier.padding(24.dp), color = Color.LightGray)
             retry?.let { TextButton(onClick = it) { Text("重试图片") } }
         } else CircularProgressIndicator()
+    }
+}
+
+@Composable
+private fun ReaderAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, description: String, action: () -> Unit) {
+    TextButton(onClick = action, modifier = Modifier.semantics { contentDescription = description }) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(icon, null)
+            Text(label, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun ReaderProgress(session: ReaderSession, seek: (Float) -> Unit) {
+    val progress = if (session.text != null) session.position.progress else session.position.imageIndex.toFloat() / (session.comic!!.imageNames.size - 1).coerceAtLeast(1)
+    var value by remember(session.position.sessionId, progress) { mutableFloatStateOf(progress) }
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("阅读进度", style = MaterialTheme.typography.bodySmall)
+            Text(if (session.text != null) "${(value * 100).toInt()}%" else "${(value * (session.comic!!.imageNames.size - 1)).toInt() + 1} / ${session.comic.imageNames.size} 页", style = MaterialTheme.typography.bodySmall)
+        }
+        ReaderSlider(value, { value = it }, Modifier.fillMaxWidth().semantics { contentDescription = "阅读进度滑杆" }, valueLabel = "${(value * 100).toInt()}%", onFinished = { seek(value) })
     }
 }

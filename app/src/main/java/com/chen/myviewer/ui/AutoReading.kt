@@ -69,11 +69,11 @@ internal fun AutoReadingSettings(settings: ReaderSettings, mode: String, onChang
     Spacer(Modifier.height(16.dp))
     if (mode == "PAGE") {
         Text("翻页间隔 · ${settings.autoPageSeconds} 秒／页", style = MaterialTheme.typography.titleMedium)
-        Slider(settings.autoPageSeconds.toFloat(), { onChange(settings.copy(autoPageSeconds = it.roundToInt())) }, valueRange = 2f..60f, steps = 57)
+        ReaderSlider(settings.autoPageSeconds.toFloat(), { onChange(settings.copy(autoPageSeconds = it.roundToInt())) }, range = 2f..60f, steps = 57, valueLabel = "${settings.autoPageSeconds} 秒")
         Text("每隔设定时间翻到下一页，末页再次前进时自动退出并标记已读完。", color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
         Text("滚动速度 · ${settings.autoScrollSpeed} 档", style = MaterialTheme.typography.titleMedium)
-        Slider(settings.autoScrollSpeed.toFloat(), { onChange(settings.copy(autoScrollSpeed = it.roundToInt())) }, valueRange = 1f..10f, steps = 8)
+        ReaderSlider(settings.autoScrollSpeed.toFloat(), { onChange(settings.copy(autoScrollSpeed = it.roundToInt())) }, range = 1f..10f, steps = 8, valueLabel = "${settings.autoScrollSpeed} 档")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("慢"); Text("快") }
         Text("匀速向下阅读，到达底部后自动退出并标记已读完。", Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
