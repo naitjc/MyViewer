@@ -106,10 +106,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     val title = app.novels.title(book)
                     val last = repository.dao.position(book.id)?.chapterKey
-                    val selected = title.novel.chapters.firstOrNull { it.url == last } ?: title.novel.chapters.firstOrNull() ?: error("请刷新小说目录。")
+                    val selected = title.novel.chapters.firstOrNull { it.url == last } ?: title.novel.chapters.firstOrNull() ?: error("没有已保存的小说章节，请导入 TXT 文件。")
                     open(book, novel = title, novelChapter = selected)
                 } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { error.value = e.message ?: "在线小说暂时无法打开" }
+                catch (e: Exception) { error.value = e.message ?: "已保存的小说暂时无法打开" }
             }
             return
         }
@@ -284,22 +284,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val book = reader.value?.book ?: return@launch
         repository.dao.encoding(book.id, value); open(book.copy(encoding = value))
     }
-    private var refreshNovelJob: Job? = null
-    fun refreshNovelChapter() {
-        if (refreshNovelJob?.isActive == true) return
-        val session = reader.value ?: return
-        val title = session.novelTitle ?: return
-        val chapter = session.novelChapter ?: return
-        refreshNovelJob = viewModelScope.launch {
-            notice.value = "正在重新加载正文…"
-            try {
-                app.novels.refreshChapter(title, chapter)
-                if (reader.value?.position?.sessionId == session.position.sessionId) open(session.book, novel = title, novelChapter = chapter)
-            } catch (error: CancellationException) { throw error }
-            catch (failure: Exception) {
-                if (reader.value?.position?.sessionId == session.position.sessionId) error.value = failure.message ?: "重新加载正文失败，请稍后重试。"
-            }
-        }
-    }
+
     override fun onCleared() { readingClock.stop(); reader.value?.comic?.close(); super.onCleared() }
 }

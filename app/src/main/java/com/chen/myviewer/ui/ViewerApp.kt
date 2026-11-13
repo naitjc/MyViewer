@@ -80,7 +80,12 @@ fun ViewerApp(vm: MainViewModel) {
         val keyboard = LocalSoftwareKeyboardController.current
         val doubleTapTimeout = LocalViewConfiguration.current.doubleTapTimeoutMillis
         var tab by rememberSaveable { mutableIntStateOf(0) }
-        var discoveryKind by rememberSaveable { mutableStateOf("漫画") }
+        var savedNovelId by rememberSaveable { mutableStateOf<String?>(null) }
+        LaunchedEffect(savedNovelId) {
+            savedNovelId?.let { id ->
+                if (novels.detail.value?.book?.id != id) vm.repository.dao.book(id)?.let(novels::showSaved)
+            }
+        }
         var shelfFilter by rememberSaveable { mutableStateOf("全部") }
         var shelfCompletion by rememberSaveable { mutableStateOf<Boolean?>(null) }
         var shelfQuery by rememberSaveable { mutableStateOf("") }
@@ -98,8 +103,8 @@ fun ViewerApp(vm: MainViewModel) {
         val returnToTop: () -> Unit = { focus.clearFocus(); keyboard?.hide(); shelfState.requestScrollToItem(0) }
         val openBook: (Book) -> Unit = {
             focus.clearFocus(); keyboard?.hide()
-            if (it.storage == "NOVEL") { novels.showSaved(it); discoveryKind = "小说"; tab = 1 }
-            else if (it.storage == "ONLINE") { sources.showSaved(it); discoveryKind = "漫画"; tab = 1 } else vm.open(it)
+            if (it.storage == "NOVEL") { novels.showSaved(it); savedNovelId = it.id; tab = 0 }
+            else if (it.storage == "ONLINE") { sources.showSaved(it); tab = 1 } else vm.open(it)
         }
         var sourceDialog by remember { mutableStateOf(false) }
         var recursive by rememberSaveable { mutableStateOf(true) }
@@ -115,6 +120,7 @@ fun ViewerApp(vm: MainViewModel) {
         LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(it); vm.notice.value = null } }
         Surface(Modifier.fillMaxSize()) {
             if (reader != null) key(reader!!.position.sessionId) { ReaderScreen(vm, reader!!, settings, snackbar) }
+            else if (savedNovelId != null) SavedNovelScreen(novels, vm) { savedNovelId = null; novels.back() }
             else Scaffold(
                 snackbarHost = { SnackbarHost(snackbar) },
                 topBar = { if (tab != 1) TopAppBar(title = { Text(listOf("书库", "发现", "历史", "设置")[tab], fontWeight = FontWeight.Bold, modifier = Modifier.clearAndSetSemantics { contentDescription = listOf("书库", "发现", "历史", "设置")[tab]; heading() }) }, actions = {
@@ -143,8 +149,7 @@ fun ViewerApp(vm: MainViewModel) {
                         filter = shelfFilter, onFilter = { shelfFilter = it }, completion = shelfCompletion, onCompletion = { shelfCompletion = it }, query = shelfQuery, onQuery = { shelfQuery = it },
                         columns = libraryColumns, state = shelfState, onTop = returnToTop,
                         open = openBook, manage = { managing = it }, import = { sourceDialog = true })
-                    1 -> if (discoveryKind == "小说") NovelScreen(novels, vm) { DiscoveryTabs(discoveryKind) { discoveryKind = it } }
-                    else SourceScreen(sources, vm) { DiscoveryTabs(discoveryKind) { discoveryKind = it } }
+                    1 -> SourceScreen(sources, vm)
                     2 -> {
                         val today by produceState(LocalDate.now().toString()) {
                             while (isActive) { delay(30000); value = LocalDate.now().toString() }
@@ -174,7 +179,7 @@ fun ViewerApp(vm: MainViewModel) {
             if (managing!!.completed) TextButton(onClick = { vm.setCompleted(managing!!, false); managing = null }) {
                 Text("取消已读完标记")
             }
-            Text(if (managing!!.storage == "NOVEL") "在线小说" else if (managing!!.storage == "ONLINE") "在线漫画" else "${if (managing!!.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (managing!!.storage == "COPY") "应用内副本" else "直接读取"}")
+            Text(if (managing!!.storage == "NOVEL") "已保存的小说" else if (managing!!.storage == "ONLINE") "在线漫画" else "${if (managing!!.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (managing!!.storage == "COPY") "应用内副本" else "直接读取"}")
             Text("移出书架后仍保留文件、进度、书签和历史。", style = MaterialTheme.typography.bodySmall)
             if (managing!!.storage !in setOf("ONLINE", "NOVEL")) TextButton(onClick = { relinking = managing; managing = null; relink.launch(arrayOf("*/*")) }) { Text("重新定位原文件，改为直接读取") }
         } }, confirmButton = { TextButton(onClick = { vm.hide(managing!!); managing = null }) { Text("移出书架") } }, dismissButton = { TextButton(onClick = { managing = null }) { Text("关闭") } })

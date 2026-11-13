@@ -153,4 +153,14 @@ class FolderDownloadTest {
         assertTrue(provider.directory.listFiles()!!.isEmpty())
         assertTrue(File(context.cacheDir, "folder-downloads").listFiles().orEmpty().isEmpty())
     }
+    @Test fun previousPermanentNovelDownloadsRemainReadableWithoutAnySource() = runBlocking {
+        val chapter = NovelChapter("第一章", "https://removed.invalid/one")
+        val title = novels.saveTitle("removed-source", NovelBook("https://removed.invalid/book", "已下载小说", chapters = listOf(chapter)))
+        val directory = File(context.filesDir, "novels/books/${title.book.id}/downloads").apply { mkdirs() }
+        File(directory, "${ComicArchive.digest(chapter.url)}.txt").writeText("保留的离线正文")
+        val reopened = NovelRepository(context, database.dao())
+        assertEquals(setOf(chapter.url), reopened.available(title))
+        assertTrue(reopened.loadChapter(reopened.title(title.book), chapter).text.contains("保留的离线正文"))
+    }
+
 }
