@@ -31,6 +31,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.chen.myviewer.download.FolderDownloadViewModel
 import com.chen.myviewer.MainViewModel
 import com.chen.myviewer.data.ChapterPosition
 import com.chen.myviewer.source.*
@@ -40,6 +42,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SourceScreen(vm: SourceViewModel, reader: MainViewModel, catalogHeader: @Composable () -> Unit = {}) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val downloads: FolderDownloadViewModel = viewModel()
     var repositoryDialog by remember { mutableStateOf(false) }
     var settingsSource by remember { mutableStateOf<String?>(null) }
     var repositoryUrl by remember { mutableStateOf(state.repositoryUrl) }
@@ -55,6 +58,7 @@ fun SourceScreen(vm: SourceViewModel, reader: MainViewModel, catalogHeader: @Com
             if (state.detail != null) IconButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新章节") }
             IconButton(onClick = { settingsSource = state.detail?.sourceId ?: state.source?.id }) { Icon(Icons.Outlined.Settings, "漫画源设置") }
         }
+        FolderDownloadStatus(downloads)
         state.busy?.let { message ->
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Text(message, Modifier.padding(horizontal = 16.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
@@ -72,7 +76,7 @@ fun SourceScreen(vm: SourceViewModel, reader: MainViewModel, catalogHeader: @Com
             }
         }
         when {
-            state.detail != null -> MangaDetails(vm, reader, state)
+            state.detail != null -> MangaDetails(vm, reader, state, downloads)
             state.source != null -> SourceSearch(vm, state)
             else -> SourceCatalog(vm, state, { repositoryUrl = state.repositoryUrl; repositoryDialog = true }, catalogHeader)
         }
@@ -192,12 +196,14 @@ private fun SourceSearch(vm: SourceViewModel, state: SourceBrowserState) {
 }
 
 @Composable
-private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: SourceBrowserState) {
+private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: SourceBrowserState, downloads: FolderDownloadViewModel) {
     val title = state.detail!!
     val library by reader.library.collectAsStateWithLifecycle()
     val book = library.firstOrNull { it.book.id == title.book.id }?.book ?: title.book
     val positions by remember(title.book.id) { reader.repository.dao.chapterPositions(title.book.id) }.collectAsStateWithLifecycle(emptyList())
     val last by produceState<com.chen.myviewer.data.ReadingPosition?>(null, title.book.id) { value = reader.repository.dao.position(title.book.id) }
+    val exportState by downloads.state.collectAsStateWithLifecycle()
+    val chooseFolder = rememberFolderDownloadPicker(title.book.id, downloads) { chapter, folder -> downloads.comic(title, chapter, folder) }
     val chapters = title.manga.chapters.orEmpty()
     val selected = chapters.firstOrNull { it.key == last?.chapterKey } ?: chapters.lastOrNull()
     val progress = positions.associateBy(ChapterPosition::chapterKey)
@@ -222,6 +228,14 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                 if (selected != null) Button(onClick = { reader.open(title.book, title, selected) }, enabled = state.busy == null) { Text(if (last?.chapterKey.isNullOrBlank()) "开始阅读" else "继续阅读") }
             }
         }
+        item {
+            OutlinedButton(onClick = { chooseFolder(null) }, enabled = !exportState.running && chapters.any { !it.locked }) {
+                Icon(Icons.Outlined.FolderOpen, null)
+                Spacer(Modifier.width(8.dp))
+                Text("下载到文件夹")
+            }
+            Text("每章保存为一个图片 ZIP，可下载 ${chapters.count { !it.locked }} 章。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (chapters.isEmpty()) item { TextButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Text("刷新章节列表") } }
         items(chapters, key = { it.key }) { chapter ->
             val saved = progress[chapter.key]
@@ -239,6 +253,7 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                         }).joinToString(" · ")
                     if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
+                IconButton(onClick = { chooseFolder(chapter.key) }, enabled = !chapter.locked && !exportState.running) { Icon(Icons.Outlined.FolderOpen, "保存 ${chapter.label} 到文件夹") }
                 if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = state.downloadStatus == null) { Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载") }
                 else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked && state.downloadStatus == null) { Icon(Icons.Outlined.Download, "下载 ${chapter.label}") }
             }

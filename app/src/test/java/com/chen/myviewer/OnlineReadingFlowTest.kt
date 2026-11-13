@@ -59,7 +59,33 @@ class OnlineReadingFlowTest {
         waitForUi { compose.onAllNodesWithText("开始阅读").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("章节 · 2").assertExists()
         capture("online-offline-chapters")
-        compose.onNodeWithText("开始阅读").performClick()
+        val exportApp = app
+        val exportProvider = TestDownloadProvider().register(exportApp)
+        compose.onNodeWithText("下载到文件夹").performScrollTo().performClick()
+        val folderRequest = shadowOf(compose.activity).nextStartedActivityForResult
+        assertEquals(android.content.Intent.ACTION_OPEN_DOCUMENT_TREE, folderRequest.intent.action)
+        compose.runOnIdle {
+            compose.activity.activityResultRegistry.dispatchResult(folderRequest.requestCode, android.app.Activity.RESULT_CANCELED, null)
+        }
+        assertTrue(exportProvider.directory.listFiles()!!.isEmpty())
+        compose.onNodeWithText("下载到文件夹").performClick()
+        val selectedFolder = shadowOf(compose.activity).nextStartedActivityForResult
+        compose.runOnIdle {
+            compose.activity.activityResultRegistry.dispatchResult(selectedFolder.requestCode, android.app.Activity.RESULT_OK, android.content.Intent().setData(exportProvider.tree))
+        }
+        val folderDownloads = ViewModelProvider(compose.activity)[com.chen.myviewer.download.FolderDownloadViewModel::class.java]
+        waitForUi { !folderDownloads.state.value.running && folderDownloads.state.value.saved == 2 }
+        assertEquals(2, exportProvider.directory.listFiles()!!.size)
+        capture("comic-folder-download")
+        compose.onNodeWithText("关闭").performClick()
+        compose.onNodeWithContentDescription("保存 第 1 话 · 第一章 到文件夹").performScrollTo().performClick()
+        val singleChapterFolder = shadowOf(compose.activity).nextStartedActivityForResult
+        compose.runOnIdle {
+            compose.activity.activityResultRegistry.dispatchResult(singleChapterFolder.requestCode, android.app.Activity.RESULT_OK, android.content.Intent().setData(exportProvider.tree))
+        }
+        waitForUi { !folderDownloads.state.value.running && folderDownloads.state.value.saved == 1 && exportProvider.directory.listFiles()!!.size == 3 }
+        compose.onNodeWithText("关闭").performClick()
+        compose.onNodeWithText("开始阅读").performScrollTo().performClick()
         waitForUi { vm.reader.value?.chapter?.key == "one" && vm.reader.value?.comic?.cachedPage(0) != null }
         compose.runOnIdle { vm.seekComic(1); vm.flushPosition() }
         compose.onRoot().performTouchInput { click(center) }

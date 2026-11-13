@@ -71,7 +71,35 @@ class OnlineNovelFlowTest {
             compose.onNodeWithText("原创联网小说").performClick()
             waitForUi { compose.onAllNodesWithText("章节 · 2").fetchSemanticsNodes().isNotEmpty() }
             capture("novel-online-details")
-            compose.onNodeWithText("开始阅读").performClick()
+            val exportApp = vm.getApplication<ViewerApplication>()
+            val exportProvider = TestDownloadProvider().register(exportApp)
+            compose.onNodeWithText("下载到文件夹").performScrollTo().performClick()
+            val folderRequest = shadowOf(compose.activity).nextStartedActivityForResult
+            assertEquals(android.content.Intent.ACTION_OPEN_DOCUMENT_TREE, folderRequest.intent.action)
+            compose.runOnIdle {
+                compose.activity.activityResultRegistry.dispatchResult(folderRequest.requestCode, android.app.Activity.RESULT_CANCELED, null)
+            }
+            assertTrue(exportProvider.directory.listFiles()!!.isEmpty())
+            compose.onNodeWithText("下载到文件夹").performClick()
+            val selectedFolder = shadowOf(compose.activity).nextStartedActivityForResult
+            compose.runOnIdle {
+                compose.activity.activityResultRegistry.dispatchResult(selectedFolder.requestCode, android.app.Activity.RESULT_OK, android.content.Intent().setData(exportProvider.tree))
+            }
+            val folderDownloads = ViewModelProvider(compose.activity)[com.chen.myviewer.download.FolderDownloadViewModel::class.java]
+            waitForUi { !folderDownloads.state.value.running && folderDownloads.state.value.saved == 1 }
+            assertEquals(1, exportProvider.directory.listFiles()!!.size)
+            capture("novel-folder-download")
+            compose.onNodeWithText("关闭").performClick()
+            compose.onNodeWithContentDescription("保存小说章节 第一章 测试 到文件夹").performScrollTo().performClick()
+            val singleChapterFolder = shadowOf(compose.activity).nextStartedActivityForResult
+            compose.activityRule.scenario.recreate()
+            compose.runOnIdle {
+                compose.activity.activityResultRegistry.dispatchResult(singleChapterFolder.requestCode, android.app.Activity.RESULT_OK, android.content.Intent().setData(exportProvider.tree))
+            }
+            waitForUi { !folderDownloads.state.value.running && folderDownloads.state.value.saved == 1 && exportProvider.directory.listFiles()!!.size == 2 }
+            compose.onNodeWithText("关闭").performClick()
+            assertTrue(exportProvider.directory.listFiles()!!.single { it.name.contains("第一章") }.readText().contains("第一章 测试"))
+            compose.onNodeWithText("开始阅读").performScrollTo().performClick()
             waitForUi { vm.reader.value?.novelChapter != null }
             val model = vm
             val book = model.reader.value!!.book
@@ -99,8 +127,8 @@ class OnlineNovelFlowTest {
             compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .9f, centerY)) }
             waitForUi { model.reader.value == null && runBlocking { model.repository.dao.chapterPosition(book.id, title.novel.chapters.last().url) }?.completed == true }
             assertFalse(runBlocking { model.repository.dao.book(book.id) }!!.completed)
-            compose.onNodeWithText("下载全书").performClick()
-            waitForUi { compose.onAllNodesWithText("已下载 2 / 2 章").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("离线下载全书").performClick()
+            waitForUi { compose.onAllNodesWithText("应用内已下载 2 / 2 章").fetchSemanticsNodes().isNotEmpty() }
             capture("novel-online-downloaded")
             compose.onNodeWithContentDescription("返回小说源").performClick()
             compose.onNodeWithContentDescription("返回小说源").performClick()

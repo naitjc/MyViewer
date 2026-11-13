@@ -56,6 +56,13 @@ class NovelSourceTest {
             assertTrue(first.text.contains("第二段"))
             assertFalse(first.text.contains("原创第二章"))
             assertFalse(paths.contains("/chapter/2"))
+            val provider = TestDownloadProvider().register(context)
+            val exports = com.chen.myviewer.download.FolderDownloadRepository(context, com.chen.myviewer.source.SourceRepository(context, db.dao()), repository)
+            exports.novel(title, details.chapters, provider.tree) { _, _ -> }
+            val exported = provider.directory.listFiles()!!.single().readText(Charsets.UTF_8)
+            assertTrue(exported.startsWith("原创测试小说\n测试作者\n"))
+            assertTrue(exported.indexOf("第一章") < exported.indexOf("第二章"))
+            assertTrue(exported.contains("原创第二段正文"))
             repository.download(title, details.chapters) { _, _ -> }
             assertEquals(2, repository.downloaded(title).size)
             repository.uninstall(source.id)
@@ -65,6 +72,10 @@ class NovelSourceTest {
             val saved = reopened.title(db.dao().book(title.book.id)!!)
             assertTrue(reopened.loadChapter(saved, details.chapters.last()).text.contains("原创第二章"))
             assertEquals(2, reopened.downloaded(saved).size)
+            exports.novel(saved, listOf(details.chapters.last()), provider.tree) { _, _ -> }
+            val chapterFile = provider.directory.listFiles()!!.single { it.name.contains("第二章") }
+            assertTrue(chapterFile.readText().contains("原创第二章"))
+            assertFalse(chapterFile.readText().contains("第一章"))
             reopened.deleteDownloads(saved)
             assertTrue(reopened.downloaded(saved).isEmpty())
         } finally { db.close() }

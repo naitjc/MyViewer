@@ -10,6 +10,7 @@ class ViewerApplication : Application() {
     val repository by lazy { LibraryRepository(this, database.dao()) }
     val readingTime by lazy { ReadingTimeRepository(database.dao()) }
     val novels by lazy { com.chen.myviewer.novel.NovelRepository(this, database.dao()) }
+    internal val folderDownloads by lazy { com.chen.myviewer.download.FolderDownloadRepository(this, sources, novels) }
     val sources by lazy { com.chen.myviewer.source.SourceRepository(this, database.dao()) }
 }
 

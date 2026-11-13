@@ -25,6 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.chen.myviewer.download.FolderDownloadViewModel
 import com.chen.myviewer.MainViewModel
 import com.chen.myviewer.novel.*
 
@@ -38,6 +40,7 @@ internal fun DiscoveryTabs(selected: String, onSelect: (String) -> Unit) {
 @Composable
 internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeader: @Composable () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val downloads: FolderDownloadViewModel = viewModel()
     var importDialog by remember { mutableStateOf(false) }
     var url by rememberSaveable { mutableStateOf(NOVEL_SOURCE_URL) }
     var filter by rememberSaveable { mutableStateOf("") }
@@ -52,6 +55,7 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
             if (state.detail != null) IconButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新小说目录") }
         }
         if (state.detail == null && state.source == null) catalogHeader()
+        FolderDownloadStatus(downloads)
         state.busy?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall); LinearProgressIndicator(Modifier.fillMaxWidth()) }
         state.downloadStatus?.let { status -> Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(status, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
@@ -61,7 +65,7 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
             Column(Modifier.padding(12.dp)) { Text(error); TextButton(onClick = vm::dismissError) { Text("关闭提示") } }
         } }
         when {
-            state.detail != null -> NovelDetails(vm, reader, state)
+            state.detail != null -> NovelDetails(vm, reader, state, downloads)
             state.source != null -> {
                 OutlinedTextField(state.query, vm::query, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("搜索小说") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { vm.search() }),
@@ -116,8 +120,10 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
 }
 
 @Composable
-private fun NovelDetails(vm: NovelViewModel, reader: MainViewModel, state: NovelBrowserState) {
+private fun NovelDetails(vm: NovelViewModel, reader: MainViewModel, state: NovelBrowserState, downloads: FolderDownloadViewModel) {
     val title = state.detail!!
+    val exportState by downloads.state.collectAsStateWithLifecycle()
+    val chooseFolder = rememberFolderDownloadPicker(title.book.id, downloads) { chapter, folder -> downloads.novel(title, chapter, folder) }
     val library by reader.library.collectAsStateWithLifecycle()
     val row = library.firstOrNull { it.book.id == title.book.id }
     val book = row?.book ?: title.book
@@ -141,10 +147,18 @@ private fun NovelDetails(vm: NovelViewModel, reader: MainViewModel, state: Novel
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { resume?.let { reader.open(book, novel = title, novelChapter = it) } }, enabled = resume != null && state.busy == null) { Text(if (row?.position == null) "开始阅读" else "继续阅读") }
-                OutlinedButton(onClick = { vm.download(title.novel.chapters) }, enabled = state.downloadStatus == null) { Text("下载全书") }
+                OutlinedButton(onClick = { vm.download(title.novel.chapters) }, enabled = state.downloadStatus == null) { Text("离线下载全书") }
             }
-            Text("已下载 ${state.downloaded.size} / ${title.novel.chapters.size} 章", style = MaterialTheme.typography.bodySmall)
+            Text("应用内已下载 ${state.downloaded.size} / ${title.novel.chapters.size} 章", style = MaterialTheme.typography.bodySmall)
             if (state.downloaded.isNotEmpty()) TextButton(onClick = { deleting = true }, enabled = state.downloadStatus == null) { Text("删除离线正文") }
+        }
+        item {
+            OutlinedButton(onClick = { chooseFolder(null) }, enabled = !exportState.running && title.novel.chapters.any { !it.locked }) {
+                Icon(Icons.Outlined.FolderOpen, null)
+                Spacer(Modifier.width(8.dp))
+                Text("下载到文件夹")
+            }
+            Text("合并保存为 UTF-8 TXT，可下载 ${title.novel.chapters.count { !it.locked }} 章。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { Text("章节 · ${title.novel.chapters.size}", style = MaterialTheme.typography.titleMedium) }
         items(title.novel.chapters, key = { it.url }) { chapter ->
@@ -154,6 +168,7 @@ private fun NovelDetails(vm: NovelViewModel, reader: MainViewModel, state: Novel
                     val status = listOfNotNull(if (chapter.locked) "需站点授权" else null, if (saved[chapter.url]?.completed == true) "已读完" else null, if (chapter.url in state.downloaded) "已下载" else null).joinToString(" · ")
                     if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                IconButton(onClick = { chooseFolder(chapter.url) }, enabled = !chapter.locked && !exportState.running) { Icon(Icons.Outlined.FolderOpen, "保存小说章节 ${chapter.name} 到文件夹") }
                 if (chapter.url !in state.downloaded) IconButton(onClick = { vm.download(listOf(chapter)) }, enabled = !chapter.locked && state.downloadStatus == null) { Icon(Icons.Outlined.Download, "下载小说章节 ${chapter.name}") }
             }
             HorizontalDivider()

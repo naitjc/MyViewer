@@ -71,6 +71,10 @@ class AidokuSourceTest {
                 assertEquals(64, document.size(0).width)
                 assertEquals(128, document.page(0).size.height)
             }
+            val provider = TestDownloadProvider().register(context)
+            val exports = com.chen.myviewer.download.FolderDownloadRepository(context, repository, com.chen.myviewer.novel.NovelRepository(context, db.dao()))
+            exports.comic(title, listOf(chapter), provider.tree) { _, _ -> }
+            assertEquals(1, provider.directory.listFiles()!!.size)
             repository.download(title, chapter) { _, _ -> }
             assertTrue(repository.downloaded(title.book.id, chapter.key))
             repository.uninstall(entry.id)
@@ -86,6 +90,8 @@ class AidokuSourceTest {
                 assertEquals(128, document.page(1).size.height)
                 assertEquals(1, document.restoreIndex("000001", 0))
             }
+            exports.comic(saved, listOf(chapter), provider.tree) { _, _ -> }
+            assertEquals(2, provider.directory.listFiles()!!.size)
             assertEquals(requestCount, requests.size)
             assertTrue(db.dao().book(title.book.id)!!.onShelf)
             repository.installPackage(entry, javaClass.getResourceAsStream("/aidoku/en.guya-v2.aix")!!.use { it.readBytes() })
