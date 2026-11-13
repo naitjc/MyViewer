@@ -64,31 +64,31 @@ class FolderDownloadTest {
         val title = title()
         var saved = 0
         exporter.comic(title, title.manga.chapters!!.asReversed(), provider.tree) { _, count -> saved = count }
-        assertEquals(2, saved)
+        assertEquals(1, saved)
         val files = provider.directory.listFiles()!!.sortedBy { it.name }
-        assertEquals(2, files.size)
-        assertTrue(files.first().name.contains("0001"))
+        assertEquals(1, files.size)
+        assertEquals("下载测试.zip", files.single().name)
         ZipFile(files.first()).use { zip ->
-            assertEquals(listOf("ComicInfo.xml", "00001.png", "00002.jpg"), zip.entries().asSequence().map { it.name }.toList())
+            assertEquals(listOf("ComicInfo.xml", "000001 第 1 话 · 开始/00001.png", "000001 第 1 话 · 开始/00002.jpg", "000002 第 2 话 · 继续/00001.png", "000002 第 2 话 · 继续/00002.jpg"), zip.entries().asSequence().map { it.name }.toList())
             assertTrue(zip.getInputStream(zip.getEntry("ComicInfo.xml")).bufferedReader().readText().contains("YesAndRightToLeft"))
         }
         ComicArchive.open(context, Book("export-import", "下载测试", "COMIC", "DIRECT", android.net.Uri.fromFile(files.first()).toString())).use { document ->
-            assertEquals(2, document.imageNames.size)
+            assertEquals(4, document.imageNames.size)
             assertEquals("RTL", document.direction)
             assertEquals(60, document.size(1).height)
         }
         assertTrue(File(context.cacheDir, "folder-downloads").listFiles().orEmpty().isEmpty())
     }
 
-    @Test fun failedLaterChapterKeepsCompletedZipAndCleansStaging() = runBlocking {
+    @Test fun failedLaterChapterLeavesNoIncompleteBookZipAndCleansStaging() = runBlocking {
         val title = title()
         val chapters = title.manga.chapters!!.asReversed()
         sources.chapterDirectory(title.book.id, chapters.last().key).deleteRecursively()
         var saved = 0
         try { exporter.comic(title, chapters, provider.tree) { _, count -> saved = count }; fail("Second chapter must fail") }
         catch (_: Exception) { }
-        assertEquals(1, saved)
-        assertEquals(1, provider.directory.listFiles()!!.size)
+        assertEquals(0, saved)
+        assertTrue(provider.directory.listFiles()!!.isEmpty())
         assertTrue(File(context.cacheDir, "folder-downloads").listFiles().orEmpty().isEmpty())
     }
 

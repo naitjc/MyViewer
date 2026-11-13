@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.update
 
 data class NovelBrowserState(
     val sources: List<NovelSource> = emptyList(),
+    val catalogFilter: String? = null,
     val source: NovelSource? = null,
     val query: String = "",
     val results: List<NovelBook> = emptyList(),
@@ -28,7 +29,7 @@ data class NovelBrowserState(
 class NovelViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as ViewerApplication
     val repository = app.novels
-    val state = MutableStateFlow(NovelBrowserState())
+    val state = MutableStateFlow(NovelBrowserState(catalogFilter = repository.catalogFilter))
     private var job: Job? = null
     private var downloadJob: Job? = null
     private var downloadingSource: String? = null
@@ -49,7 +50,15 @@ class NovelViewModel(application: Application) : AndroidViewModel(application) {
         val sources = withContext(Dispatchers.IO) { repository.sources() }
         state.update { it.copy(sources = sources) }
     }
-    fun importUrl(url: String) = work("正在导入小说源…") { repository.importUrl(url); refreshSources() }
+    fun importUrl(url: String) = work("正在导入小说源…") {
+        repository.importUrl(url)
+        refreshSources()
+        filterCatalog(url)
+    }
+    fun filterCatalog(url: String?) {
+        repository.setCatalogFilter(url)
+        state.update { it.copy(catalogFilter = url) }
+    }
     fun importFile(uri: Uri) = work("正在导入小说源…") {
         val json = withContext(Dispatchers.IO) {
             app.contentResolver.openInputStream(uri)?.use { boundedBytes(it, 32 * 1024 * 1024).toString(Charsets.UTF_8) } ?: error("无法读取书源文件。")

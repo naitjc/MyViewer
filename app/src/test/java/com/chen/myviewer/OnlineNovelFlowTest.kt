@@ -61,9 +61,15 @@ class OnlineNovelFlowTest {
             waitForUi { compose.onAllNodesWithContentDescription("导入小说源").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("导入小说源").performClick()
             waitForUi { compose.onAllNodes(hasSetTextAction() and hasText("书源 JSON 地址")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("speauty 自用").assertIsSelected()
+            compose.onNodeWithText("XIU2 自用").performClick()
+            compose.onNode(hasSetTextAction() and hasText("书源 JSON 地址")).assertTextContains("https://raw.githubusercontent.com/XIU2/Yuedu/master/shuyuan")
+            capture("novel-personal-catalogs")
             compose.onNode(hasSetTextAction() and hasText("书源 JSON 地址")).performTextReplacement(server.url("/sources").toString())
             compose.onNodeWithText("网络导入").performClick()
             waitForUi { compose.onAllNodesWithText("小说测试源").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithContentDescription("更新当前小说源仓库").assertExists()
+            compose.onNodeWithText("全部已导入").performClick()
             compose.onNodeWithContentDescription("浏览小说源 小说测试源").performClick()
             compose.onNode(hasSetTextAction() and hasText("搜索小说")).performTextInput("原创")
             compose.onNodeWithContentDescription("搜索小说").performClick()
@@ -73,14 +79,14 @@ class OnlineNovelFlowTest {
             capture("novel-online-details")
             val exportApp = vm.getApplication<ViewerApplication>()
             val exportProvider = TestDownloadProvider().register(exportApp)
-            compose.onNodeWithText("下载到文件夹").performScrollTo().performClick()
+            compose.onNodeWithText("下载整本到文件夹").performScrollTo().performClick()
             val folderRequest = shadowOf(compose.activity).nextStartedActivityForResult
             assertEquals(android.content.Intent.ACTION_OPEN_DOCUMENT_TREE, folderRequest.intent.action)
             compose.runOnIdle {
                 compose.activity.activityResultRegistry.dispatchResult(folderRequest.requestCode, android.app.Activity.RESULT_CANCELED, null)
             }
             assertTrue(exportProvider.directory.listFiles()!!.isEmpty())
-            compose.onNodeWithText("下载到文件夹").performClick()
+            compose.onNodeWithText("下载整本到文件夹").performClick()
             val selectedFolder = shadowOf(compose.activity).nextStartedActivityForResult
             compose.runOnIdle {
                 compose.activity.activityResultRegistry.dispatchResult(selectedFolder.requestCode, android.app.Activity.RESULT_OK, android.content.Intent().setData(exportProvider.tree))
@@ -162,7 +168,7 @@ class OnlineNovelFlowTest {
     }
     private fun capture(name: String) {
         compose.runOnIdle {
-            val view = compose.activity.window.decorView
+            val view = android.view.inspector.WindowInspector.getGlobalWindowViews().lastOrNull() ?: compose.activity.window.decorView
             val image = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
             view.draw(android.graphics.Canvas(image))
             val file = File(System.getProperty("myviewer.outputDir"), "$name.png").apply { parentFile?.mkdirs() }

@@ -11,6 +11,10 @@ import java.util.concurrent.TimeUnit
 
 /** Evaluates source rules against HTML, JSON or the result of the preceding rule. */
 internal class LegadoRules(private val variables: Map<String, Any> = emptyMap(), private val ajax: (String) -> String) {
+    companion object {
+        // Android ICU requires escaped closing braces in this expression.
+        internal val TEMPLATE_PATTERN = Regex("\\{\\{([\\s\\S]*?)\\}\\}")
+    }
     private val stored = mutableMapOf<String, String>()
     private var deadline = Long.MAX_VALUE
     private val factory = object : ContextFactory() {
@@ -56,7 +60,7 @@ internal class LegadoRules(private val variables: Map<String, Any> = emptyMap(),
             }
         })
     }
-    fun template(rule: String, data: Any?, baseUrl: String): String = Regex("\\{\\{([\\s\\S]*?)}}").replace(rule) { match ->
+    fun template(rule: String, data: Any?, baseUrl: String): String = TEMPLATE_PATTERN.replace(rule) { match ->
         val expression = match.groupValues[1].trim()
         if (expression.startsWith('$') || expression.startsWith('@')) text(data, expression.removePrefix("@"), baseUrl)
         else script(expression, data, baseUrl).toString()
@@ -123,7 +127,7 @@ internal class LegadoRules(private val variables: Map<String, Any> = emptyMap(),
                     else -> element.attr(part)
                 } }.filter { it.isNotBlank() }
             }
-            val exclude = part.substringAfter('!', "").split(',').mapNotNull { it.toIntOrNull() }
+            val exclude = part.substringAfter('!', "").split(',', ':').mapNotNull { it.toIntOrNull() }
             val selectorPart = part.substringBefore('!')
             val indexed = Regex("^(.*)\\.(-?\\d+)(?::(-?\\d+))?$").matchEntire(selectorPart)
             val selector = indexed?.groupValues?.get(1) ?: selectorPart

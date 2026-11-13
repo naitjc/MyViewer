@@ -37,21 +37,22 @@ internal class FolderDownloadRepository(
         withContext(Dispatchers.IO) {
             val folder = destination(tree)
             prepareStaging()
-            chapters.forEachIndexed { index, chapter ->
-                coroutineContext.ensureActive()
-                val temporary = File.createTempFile("comic-", ".zip", staging)
-                try {
-                    val pages = sources.chapterPages(title, chapter)
-                    require(pages.isNotEmpty()) { "${chapter.label} 没有可下载的图片。" }
-                    runInterruptible {
-                        ZipOutputStream(temporary.outputStream().buffered()).use { zip ->
-                            if (title.manga.viewer == 2) {
-                                zip.putNextEntry(ZipEntry("ComicInfo.xml"))
-                                zip.write("<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>".toByteArray())
-                                zip.closeEntry()
-                            }
+            val temporary = File.createTempFile("comic-", ".zip", staging)
+            try {
+                ZipOutputStream(temporary.outputStream().buffered()).use { zip ->
+                    if (title.manga.viewer == 2) {
+                        zip.putNextEntry(ZipEntry("ComicInfo.xml"))
+                        zip.write("<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>".toByteArray())
+                        zip.closeEntry()
+                    }
+                    chapters.forEachIndexed { index, chapter ->
+                        coroutineContext.ensureActive()
+                        val pages = sources.chapterPages(title, chapter)
+                        require(pages.isNotEmpty()) { "${chapter.label} 没有可下载的图片。" }
+                        val directory = if (chapters.size > 1) "${(index + 1).toString().padStart(6, '0')} ${safeName(chapter.label)}/" else ""
+                        runInterruptible {
                             pages.indices.forEach { page ->
-                                progress("${title.manga.title} · ${chapter.label} · ${page + 1}/${pages.size} 页", index)
+                                progress("${title.manga.title} · ${index + 1}/${chapters.size} 章 · ${page + 1}/${pages.size} 页", 0)
                                 val image = sources.imageFile(title, chapter, pages, page)
                                 val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                                 BitmapFactory.decodeFile(image.path, options)
@@ -62,21 +63,21 @@ internal class FolderDownloadRepository(
                                     "image/gif" -> "gif"
                                     else -> error("无法识别第 ${page + 1} 页的图片格式。")
                                 }
-                                zip.putNextEntry(ZipEntry("${(page + 1).toString().padStart(5, '0')}.$extension"))
+                                zip.putNextEntry(ZipEntry("$directory${(page + 1).toString().padStart(5, '0')}.$extension"))
                                 image.inputStream().use { copy(it, zip) }
                                 zip.closeEntry()
                             }
                         }
                     }
-                    val number = title.manga.chapters.orEmpty().asReversed().indexOfFirst { it.key == chapter.key } + 1
-                    val name = "${title.manga.title.take(30).trimEnd { it.isHighSurrogate() }} - ${number.toString().padStart(4, '0')} ${chapter.label}"
-                    runInterruptible {
-                        progress("正在保存 ${chapter.label}", index)
-                        publish(folder, temporary, name, "zip", "application/zip")
-                        progress("已保存 ${index + 1}/${chapters.size} 个 ZIP", index + 1)
-                    }
-                } finally { temporary.delete() }
-            }
+                }
+                coroutineContext.ensureActive()
+                val name = if (chapters.size == 1) "${title.manga.title.take(30).trimEnd { it.isHighSurrogate() }} - ${chapters.single().label}" else title.manga.title
+                runInterruptible {
+                    progress("正在保存 ${title.manga.title}.zip", 0)
+                    publish(folder, temporary, name, "zip", "application/zip")
+                    progress("已保存 ZIP，共 ${chapters.size} 章", 1)
+                }
+            } finally { temporary.delete() }
         }
     }
 

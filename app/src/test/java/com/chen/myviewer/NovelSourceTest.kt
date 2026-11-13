@@ -119,4 +119,49 @@ class NovelSourceTest {
         try { rules.text("", "@js:java.getClass().forName('java.lang.Runtime')"); fail("Java reflection must be unavailable") }
         catch (_: Exception) { }
     }
+    @Test fun templatePatternUsesIcuSafeDelimitersAndRendersRequestExpressions() {
+        assertTrue(LegadoRules.TEMPLATE_PATTERN.pattern.endsWith("\\}\\}"))
+        val rules = LegadoRules(mapOf("page" to 3)) { "" }
+        assertEquals("p=2&next=3", rules.template("p={{page-1}}&next={{page}}", "", ""))
+        assertEquals("前文😀后文", rules.template("前文{{'😀'}}后文", "", ""))
+        assertEquals("keep {single} braces", rules.template("keep {single} braces", "", ""))
+    }
+
+    @Test fun personalCatalogImportsRetainOriginAndExcludePreviewChapterIndexes() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val database = Room.inMemoryDatabaseBuilder(context, ViewerDatabase::class.java).allowMainThreadQueries().build()
+        val json = javaClass.getResourceAsStream("/legado/aixiashu.json")!!.bufferedReader().use { it.readText() }
+        val http = SourceHttp(context, Interceptor { chain ->
+            val request = chain.request()
+            val body = when (request.url.encodedPath) {
+                "/speauty/legado.sources/main/subscriptions/active.json" -> json
+                "/modules/article/search.php" -> """<table class="grid"><tbody><tr><th>书名</th></tr><tr><td class="even"><a href="/book">原创个人源测试</a></td><td class="even">测试作者</td></tr></tbody></table>"""
+                "/book" -> """<div id="info"><h1>原创个人源测试</h1><p>作    者：测试作者</p></div><div id="list"><dl>""" +
+                    """<dd><a href="/two">最新 第二章</a></dd>""".repeat(9) + """<dd><a href="/one">第一章</a></dd><dd><a href="/two">第二章</a></dd></dl></div>"""
+                "/one" -> """<div id="content">原创第一段。<br>原创第二段。</div>"""
+                "/two" -> """<div id="content">原创第二章。</div>"""
+                else -> error("Unexpected request ${request.url}")
+            }
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(body.toResponseBody()).build()
+        })
+        try {
+            val repository = NovelRepository(context, database.dao(), http)
+            assertEquals(1, repository.importUrl(NOVEL_SOURCE_URL))
+            assertEquals(NOVEL_SOURCE_URL, repository.sources().single().catalog)
+            repository.setCatalogFilter(NOVEL_SOURCE_URL)
+            assertEquals(NOVEL_SOURCE_URL, NovelRepository(context, database.dao(), http).catalogFilter)
+            repository.importJson(json)
+            val source = repository.sources().single()
+            assertEquals(NOVEL_SOURCE_URL, source.catalog)
+            val result = repository.search(source.id, "原创", 1).single()
+            val book = repository.details(source.id, result)
+            assertEquals(listOf("第一章", "第二章"), book.chapters.map { it.name })
+            val title = repository.saveTitle(source.id, book)
+            assertTrue(repository.loadChapter(title, book.chapters.first()).text.contains("原创第二段"))
+            repository.importJson(json, "https://example.test/alternate.json")
+            assertEquals("https://example.test/alternate.json", repository.sources().single().catalog)
+            assertEquals(title.book.id, repository.saveTitle(source.id, book).book.id)
+        } finally { database.close() }
+    }
+
 }

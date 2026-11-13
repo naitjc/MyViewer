@@ -9,6 +9,7 @@ data class NovelSource(val json: JSONObject) {
     val url: String get() = json.getString("bookSourceUrl")
     val id: String get() = ComicArchive.digest(url)
     val name: String get() = json.getString("bookSourceName")
+    val catalog: String? get() = json.optString("_myviewerCatalog").takeIf { it.isNotBlank() }
     val baseUrl: String get() = url.substringBefore('#')
     fun rule(group: String): JSONObject = json.optJSONObject(group)
         ?: json.optString(group).takeIf { it.startsWith('{') }?.let(::JSONObject) ?: JSONObject()

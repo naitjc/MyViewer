@@ -1,6 +1,7 @@
 package com.chen.myviewer.novel
 
 import android.content.Context
+import androidx.core.content.edit
 import com.chen.myviewer.data.Book
 import com.chen.myviewer.data.ViewerDao
 import com.chen.myviewer.reader.comic.ComicArchive
@@ -16,13 +17,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-const val NOVEL_SOURCE_URL = "https://raw.githubusercontent.com/tickmao/Novel/master/sources/legado/full.json"
-
 class NovelRepository internal constructor(private val context: Context, private val dao: ViewerDao, private val http: SourceHttp) {
     constructor(context: Context, dao: ViewerDao) : this(context, dao, SourceHttp(context))
     private val root = File(context.filesDir, "novels")
     private val sourceFile = File(root, "sources.json")
     private val lock = Mutex()
+    private val preferences = context.getSharedPreferences("novel-catalogs", Context.MODE_PRIVATE)
+    val catalogFilter: String? get() = preferences.getString("filter", null)
+    fun setCatalogFilter(url: String?) { preferences.edit { putString("filter", url) } }
 
     fun sources(): List<NovelSource> = synchronized(sourceFile.absolutePath.intern()) {
         if (!sourceFile.exists()) emptyList() else parseSources(sourceFile.readText())
@@ -31,14 +33,19 @@ class NovelRepository internal constructor(private val context: Context, private
         require(url.startsWith("https://") || url.startsWith("http://")) { "请输入有效的书源 JSON 地址。" }
         val response = runInterruptible(Dispatchers.IO) { http.request(url) }
         require(response.status in 200..299) { "书源下载失败（HTTP ${response.status}）。" }
-        return importJson(response.data.toString(Charsets.UTF_8))
+        return importJson(response.data.toString(Charsets.UTF_8), url)
     }
-    suspend fun importJson(json: String): Int = lock.withLock {
+    suspend fun importJson(json: String, catalog: String? = null): Int = lock.withLock {
         runInterruptible(Dispatchers.IO) {
             val imported = parseSources(json)
             require(imported.isNotEmpty()) { "文件中没有 Legado 小说书源。" }
             synchronized(sourceFile.absolutePath.intern()) {
-                val merged = (sources() + imported).associateBy { it.id }.values
+                val existing = sources().associateBy { it.id }
+                imported.forEach { source ->
+                    val origin = catalog ?: existing[source.id]?.catalog
+                    if (origin != null) source.json.put("_myviewerCatalog", origin)
+                }
+                val merged = (existing.values + imported).associateBy { it.id }.values
                 val payload = JSONArray(merged.map { it.json }).toString()
                 require(merged.size <= 10_000 && payload.length <= 32 * 1024 * 1024) { "已保存的小说源超过容量上限。" }
                 atomicWrite(sourceFile, payload.toByteArray())

@@ -5,6 +5,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -51,6 +53,7 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (state.source != null || state.detail != null) IconButton(onClick = vm::back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回小说源") }
             Text(state.detail?.novel?.name ?: state.source?.name ?: "发现", Modifier.weight(1f).clearAndSetSemantics { contentDescription = "小说源页面"; heading() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            if (state.detail == null && state.source == null && !state.catalogFilter.isNullOrBlank()) IconButton(onClick = { vm.importUrl(state.catalogFilter!!) }, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "更新当前小说源仓库") }
             if (state.detail == null && state.source == null) IconButton(onClick = { importDialog = true }) { Icon(Icons.Outlined.Add, "导入小说源") }
             if (state.detail != null) IconButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新小说目录") }
         }
@@ -84,11 +87,22 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
             }
             else -> {
                 OutlinedTextField(filter, { filter = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("筛选小说源") }, singleLine = true)
+                val catalogs = (state.sources.mapNotNull { it.catalog } + listOfNotNull(state.catalogFilter?.takeIf { it.isNotBlank() })).distinct()
+                if (catalogs.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(state.catalogFilter == null, { vm.filterCatalog(null) }, label = { Text("全部已导入") }, colors = shelfChipColors())
+                    catalogs.forEach { catalog -> FilterChip(state.catalogFilter == catalog, { vm.filterCatalog(catalog) }, label = { Text(novelCatalogName(catalog)) }, colors = shelfChipColors()) }
+                    if (state.sources.any { it.catalog == null }) FilterChip(state.catalogFilter == "", { vm.filterCatalog("") }, label = { Text("其他来源") }, colors = shelfChipColors())
+                }
+                val visibleSources = state.sources.filter {
+                    (state.catalogFilter == null || it.catalog.orEmpty() == state.catalogFilter) &&
+                        "${it.name} ${it.baseUrl} ${it.json.optString("bookSourceGroup")}".contains(filter, true)
+                }
                 if (state.sources.isEmpty()) {
                     Text("导入 Legado JSON 书源后即可搜索小说。", Modifier.padding(20.dp))
                     FilledTonalButton(onClick = { importDialog = true }, modifier = Modifier.padding(horizontal = 20.dp)) { Text("导入小说源") }
                 } else LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
-                    items(state.sources.filter { it.name.contains(filter, true) || it.baseUrl.contains(filter, true) }, key = { it.id }) { source ->
+                    if (visibleSources.isEmpty()) item { Text("没有匹配的小说源，可以调整仓库筛选或关键词。", Modifier.padding(vertical = 20.dp)) }
+                    items(visibleSources, key = { it.id }) { source ->
                         Row(Modifier.fillMaxWidth().clickable(enabled = state.busy == null) { vm.choose(source) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(source.name, style = MaterialTheme.typography.titleMedium)
@@ -106,10 +120,14 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
     if (importDialog) ModalBottomSheet(onDismissRequest = { importDialog = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).imePadding().navigationBarsPadding().padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("导入 Legado 小说源", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                Text("小说书源仓库", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 IconButton(onClick = { importDialog = false }) { Icon(Icons.Outlined.Close, "关闭导入面板") }
             }
-            Text("支持单个书源或书源合集。默认地址为 tickmao 的主要书源包。", style = MaterialTheme.typography.bodySmall)
+            Text("选择个人维护仓库，或填写 Legado 书源 JSON 地址。", style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NOVEL_SOURCE_CATALOGS.forEach { catalog -> FilterChip(url == catalog.url, { url = catalog.url }, label = { Text(catalog.name) }, colors = shelfChipColors()) }
+            }
+            NOVEL_SOURCE_CATALOGS.firstOrNull { it.url == url }?.let { catalog -> Text(catalog.repository, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             OutlinedTextField(url, { url = it }, label = { Text("书源 JSON 地址") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Button(onClick = { importDialog = false; vm.importUrl(url.trim()) }, modifier = Modifier.fillMaxWidth()) { Text("网络导入") }
             TextButton(onClick = { importDialog = false; filePicker.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text("从 JSON 文件导入") }
@@ -156,7 +174,7 @@ private fun NovelDetails(vm: NovelViewModel, reader: MainViewModel, state: Novel
             OutlinedButton(onClick = { chooseFolder(null) }, enabled = !exportState.running && title.novel.chapters.any { !it.locked }) {
                 Icon(Icons.Outlined.FolderOpen, null)
                 Spacer(Modifier.width(8.dp))
-                Text("下载到文件夹")
+                Text("下载整本到文件夹")
             }
             Text("合并保存为 UTF-8 TXT，可下载 ${title.novel.chapters.count { !it.locked }} 章。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

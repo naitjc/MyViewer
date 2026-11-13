@@ -232,9 +232,9 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
             OutlinedButton(onClick = { chooseFolder(null) }, enabled = !exportState.running && chapters.any { !it.locked }) {
                 Icon(Icons.Outlined.FolderOpen, null)
                 Spacer(Modifier.width(8.dp))
-                Text("下载到文件夹")
+                Text("下载整本到文件夹")
             }
-            Text("每章保存为一个图片 ZIP，可下载 ${chapters.count { !it.locked }} 章。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("整本合并为一个 ZIP，含 ${chapters.count { !it.locked }} 个可读章节。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (chapters.isEmpty()) item { TextButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Text("刷新章节列表") } }
         items(chapters, key = { it.key }) { chapter ->
