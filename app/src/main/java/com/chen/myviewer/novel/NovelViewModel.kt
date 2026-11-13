@@ -24,6 +24,7 @@ data class NovelBrowserState(
     val error: String? = null,
     val downloaded: Set<String> = emptySet(),
     val downloadStatus: String? = null,
+    val validationSummary: String? = null,
 )
 
 class NovelViewModel(application: Application) : AndroidViewModel(application) {
@@ -34,7 +35,11 @@ class NovelViewModel(application: Application) : AndroidViewModel(application) {
     private var downloadJob: Job? = null
     private var downloadingSource: String? = null
     private var generation = 0L
-    init { work("正在读取小说源…") { refreshSources() } }
+    init { work("正在整合小说源…") {
+        repository.installIntegrated()
+        state.update { it.copy(catalogFilter = repository.catalogFilter) }
+        refreshSources()
+    } }
     private fun work(message: String, action: suspend () -> Unit) {
         job?.cancel()
         val revision = ++generation
@@ -51,10 +56,29 @@ class NovelViewModel(application: Application) : AndroidViewModel(application) {
         state.update { it.copy(sources = sources) }
     }
     fun importUrl(url: String) = work("正在导入小说源…") {
-        repository.importUrl(url)
+        if (url == INTEGRATED_NOVEL_CATALOG) repository.installIntegrated(true)
+        else repository.importUrl(url)
         refreshSources()
         filterCatalog(url)
+        val candidates = state.value.sources.filter { it.catalog == url && it.check == null }
+        if (candidates.isEmpty()) state.update { it.copy(validationSummary = "已加载 ${it.sources.count { source -> source.catalog == url && source.check?.passed == true }} 个可用书源") }
+        else validateSources(candidates)
     }
+    private suspend fun validateSources(candidates: List<NovelSource>) {
+        try {
+            repository.validate(candidates) { done, total, name -> state.update { it.copy(busy = "正在验证 $done / $total · $name") } }
+        } catch (error: CancellationException) {
+            state.update { it.copy(validationSummary = "已取消验证，已完成的校验结果已保存") }
+            throw error
+        } finally { withContext(NonCancellable) { refreshSources() } }
+        val ids = candidates.map { it.id }.toSet()
+        val checked = state.value.sources.filter { it.id in ids }
+        state.update { it.copy(validationSummary = "验证完成 · 通过 ${checked.count { source -> source.check?.passed == true }} · 未通过 ${checked.count { source -> source.check?.passed == false }}") }
+    }
+    fun validateAll() = work("正在验证小说源…") { validateSources(state.value.sources) }
+    fun validateSource(source: NovelSource) = work("正在验证 ${source.name}…") { validateSources(listOf(source)) }
+    fun cancelWork() { job?.cancel() }
+    fun dismissValidationSummary() { state.update { it.copy(validationSummary = null) } }
     fun filterCatalog(url: String?) {
         repository.setCatalogFilter(url)
         state.update { it.copy(catalogFilter = url) }
@@ -65,6 +89,8 @@ class NovelViewModel(application: Application) : AndroidViewModel(application) {
         }
         repository.importJson(json)
         refreshSources()
+        val ids = NovelRepository.parseSources(json).map { it.id }.toSet()
+        validateSources(state.value.sources.filter { it.id in ids })
     }
     fun uninstall(source: NovelSource) = work("正在删除小说源…") {
         if (downloadingSource == source.id) downloadJob?.cancelAndJoin()

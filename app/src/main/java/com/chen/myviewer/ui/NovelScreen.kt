@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.FactCheck
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -44,8 +45,9 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
     val state by vm.state.collectAsStateWithLifecycle()
     val downloads: FolderDownloadViewModel = viewModel()
     var importDialog by remember { mutableStateOf(false) }
-    var url by rememberSaveable { mutableStateOf(NOVEL_SOURCE_URL) }
+    var url by rememberSaveable { mutableStateOf(INTEGRATED_NOVEL_CATALOG) }
     var filter by rememberSaveable { mutableStateOf("") }
+    var validationFilter by rememberSaveable { mutableStateOf("可用") }
     var removing by remember { mutableStateOf<NovelSource?>(null) }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(vm::importFile) }
     BackHandler(state.detail != null || state.source != null) { vm.back() }
@@ -53,13 +55,20 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (state.source != null || state.detail != null) IconButton(onClick = vm::back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回小说源") }
             Text(state.detail?.novel?.name ?: state.source?.name ?: "发现", Modifier.weight(1f).clearAndSetSemantics { contentDescription = "小说源页面"; heading() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            if (state.detail == null && state.source == null && !state.catalogFilter.isNullOrBlank()) IconButton(onClick = { vm.importUrl(state.catalogFilter!!) }, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "更新当前小说源仓库") }
+            if (state.detail == null && state.source == null && state.sources.isNotEmpty()) IconButton(onClick = vm::validateAll, enabled = state.busy == null) { Icon(Icons.AutoMirrored.Outlined.FactCheck, "验证并清理小说源") }
+            if (state.detail == null && state.source == null && !state.catalogFilter.isNullOrBlank()) IconButton(onClick = { vm.importUrl(state.catalogFilter!!) }, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, if (state.catalogFilter == INTEGRATED_NOVEL_CATALOG) "重新加载整合书源" else "更新当前小说源仓库") }
             if (state.detail == null && state.source == null) IconButton(onClick = { importDialog = true }) { Icon(Icons.Outlined.Add, "导入小说源") }
             if (state.detail != null) IconButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新小说目录") }
         }
         if (state.detail == null && state.source == null) catalogHeader()
         FolderDownloadStatus(downloads)
-        state.busy?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall); LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        state.busy?.let { message ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = vm::cancelWork) { Text("取消") }
+            }
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
         state.downloadStatus?.let { status -> Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(status, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = vm::cancelDownload) { Text("取消下载") }
@@ -67,6 +76,12 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
         state.error?.let { error -> Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth().padding(12.dp), shape = MaterialTheme.shapes.medium) {
             Column(Modifier.padding(12.dp)) { Text(error); TextButton(onClick = vm::dismissError) { Text("关闭提示") } }
         } }
+        if (state.source == null && state.detail == null) state.validationSummary?.let { summary ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(summary, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = vm::dismissValidationSummary) { Text("关闭结果") }
+            }
+        }
         when {
             state.detail != null -> NovelDetails(vm, reader, state, downloads)
             state.source != null -> {
@@ -93,22 +108,30 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
                     catalogs.forEach { catalog -> FilterChip(state.catalogFilter == catalog, { vm.filterCatalog(catalog) }, label = { Text(novelCatalogName(catalog)) }, colors = shelfChipColors()) }
                     if (state.sources.any { it.catalog == null }) FilterChip(state.catalogFilter == "", { vm.filterCatalog("") }, label = { Text("其他来源") }, colors = shelfChipColors())
                 }
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("可用", "待验证", "未通过").forEach { label -> FilterChip(validationFilter == label, { validationFilter = label }, label = { Text(label) }, colors = shelfChipColors()) }
+                }
                 val visibleSources = state.sources.filter {
                     (state.catalogFilter == null || it.catalog.orEmpty() == state.catalogFilter) &&
-                        "${it.name} ${it.baseUrl} ${it.json.optString("bookSourceGroup")}".contains(filter, true)
-                }
+                        "${it.name} ${it.baseUrl} ${it.json.optString("bookSourceGroup")}".contains(filter, true) &&
+                        when (validationFilter) { "可用" -> it.check?.passed == true; "未通过" -> it.check?.passed == false; else -> it.check == null }
+                }.sortedBy { if (it.catalog == INTEGRATED_NOVEL_CATALOG) 0 else 1 }.distinctBy { it.originKey }
                 if (state.sources.isEmpty()) {
-                    Text("导入 Legado JSON 书源后即可搜索小说。", Modifier.padding(20.dp))
+                    Text("加载整合书源，或导入自己的 Legado 书源并验证。", Modifier.padding(20.dp))
                     FilledTonalButton(onClick = { importDialog = true }, modifier = Modifier.padding(horizontal = 20.dp)) { Text("导入小说源") }
                 } else LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp)) {
                     if (visibleSources.isEmpty()) item { Text("没有匹配的小说源，可以调整仓库筛选或关键词。", Modifier.padding(vertical = 20.dp)) }
                     items(visibleSources, key = { it.id }) { source ->
-                        Row(Modifier.fillMaxWidth().clickable(enabled = state.busy == null) { vm.choose(source) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().clickable(enabled = state.busy == null) { if (source.check?.passed == true) vm.choose(source) else vm.validateSource(source) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(source.name, style = MaterialTheme.typography.titleMedium)
                                 Text(source.baseUrl, maxLines = 1, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                source.check?.let { check ->
+                                    Text(if (check.passed) "验证通过 · ${check.samples} 个正文样本" else "${check.stage}未通过 · ${check.message}", style = MaterialTheme.typography.bodySmall, maxLines = 3, color = if (check.passed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
+                                }
                             }
-                            IconButton(onClick = { vm.choose(source) }, enabled = state.busy == null) { Icon(Icons.Outlined.Search, "浏览小说源 ${source.name}") }
+                            if (source.check?.passed == true) IconButton(onClick = { vm.choose(source) }, enabled = state.busy == null) { Icon(Icons.Outlined.Search, "浏览小说源 ${source.name}") }
+                            else IconButton(onClick = { vm.validateSource(source) }, enabled = state.busy == null) { Icon(Icons.AutoMirrored.Outlined.FactCheck, "验证 ${source.name}") }
                             IconButton(onClick = { removing = source }, enabled = state.busy == null) { Icon(Icons.Outlined.DeleteOutline, "删除小说源 ${source.name}") }
                         }
                         HorizontalDivider()
@@ -129,7 +152,7 @@ internal fun NovelScreen(vm: NovelViewModel, reader: MainViewModel, catalogHeade
             }
             NOVEL_SOURCE_CATALOGS.firstOrNull { it.url == url }?.let { catalog -> Text(catalog.repository, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             OutlinedTextField(url, { url = it }, label = { Text("书源 JSON 地址") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            Button(onClick = { importDialog = false; vm.importUrl(url.trim()) }, modifier = Modifier.fillMaxWidth()) { Text("网络导入") }
+            Button(onClick = { importDialog = false; validationFilter = "可用"; vm.importUrl(url.trim()) }, modifier = Modifier.fillMaxWidth()) { Text(if (url == INTEGRATED_NOVEL_CATALOG) "加载整合书源" else "导入并验证") }
             TextButton(onClick = { importDialog = false; filePicker.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text("从 JSON 文件导入") }
         }
     }

@@ -280,8 +280,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runCatching { repository.dao.relink(book.id, uri.toString()); repository.dao.book(book.id)?.let { open(it) } }.onFailure { error.value = it.message }
     }
     fun encoding(value: String) = viewModelScope.launch {
+        if (reader.value?.novelTitle != null) return@launch
         val book = reader.value?.book ?: return@launch
         repository.dao.encoding(book.id, value); open(book.copy(encoding = value))
+    }
+    private var refreshNovelJob: Job? = null
+    fun refreshNovelChapter() {
+        if (refreshNovelJob?.isActive == true) return
+        val session = reader.value ?: return
+        val title = session.novelTitle ?: return
+        val chapter = session.novelChapter ?: return
+        refreshNovelJob = viewModelScope.launch {
+            notice.value = "正在重新加载正文…"
+            try {
+                app.novels.refreshChapter(title, chapter)
+                if (reader.value?.position?.sessionId == session.position.sessionId) open(session.book, novel = title, novelChapter = chapter)
+            } catch (error: CancellationException) { throw error }
+            catch (failure: Exception) {
+                if (reader.value?.position?.sessionId == session.position.sessionId) error.value = failure.message ?: "重新加载正文失败，请稍后重试。"
+            }
+        }
     }
     override fun onCleared() { readingClock.stop(); reader.value?.comic?.close(); super.onCleared() }
 }

@@ -41,13 +41,15 @@ class OnlineNovelFlowTest {
         val json = JSONObject(javaClass.getResourceAsStream("/legado/deqitxt.json")!!.bufferedReader().use { it.readText() })
             .put("bookSourceUrl", server.url("/").toString()).put("bookSourceName", "小说测试源")
             .put("searchUrl", server.url("/search").toString() + "?key={{key}}")
+        val healthy = java.util.concurrent.atomic.AtomicBoolean(false)
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.requestUrl!!.encodedPath == "/search" && !healthy.get()) return MockResponse().setResponseCode(404)
                 val body = when (request.requestUrl!!.encodedPath) {
                     "/sources" -> json.toString()
                     "/search" -> """<div class="container"><div class="item"><h3><a href="/book">原创联网小说</a></h3><p></p><p><a>测试作者</a></p></div></div>"""
                     "/book" -> """<div class="itemtxt"><h1><a>原创联网小说</a></h1></div><div class="des">原创新章节测试</div><ul id="list"><li><a href="/chapter/1">第一章 测试</a></li><li><a href="/chapter/2">第二章 测试</a></li></ul>"""
-                    "/chapter/1", "/chapter/2" -> "<div class='con'><p>" + "原创小说测试文字。".repeat(400) + "</p></div>"
+                    "/chapter/1", "/chapter/2" -> "<div class='con'><p>" + ("原创小说测试文字。" + request.requestUrl!!.encodedPath).repeat(400) + "</p></div>"
                     else -> return MockResponse().setResponseCode(404)
                 }
                 return MockResponse().setHeader("Content-Type", "text/html; charset=utf-8").setBody(body)
@@ -61,12 +63,23 @@ class OnlineNovelFlowTest {
             waitForUi { compose.onAllNodesWithContentDescription("导入小说源").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("导入小说源").performClick()
             waitForUi { compose.onAllNodes(hasSetTextAction() and hasText("书源 JSON 地址")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("speauty 自用").assertIsSelected()
+            compose.onAllNodesWithText("整合书源").onLast().assertIsSelected()
             compose.onNodeWithText("XIU2 自用").performClick()
             compose.onNode(hasSetTextAction() and hasText("书源 JSON 地址")).assertTextContains("https://raw.githubusercontent.com/XIU2/Yuedu/master/shuyuan")
             capture("novel-personal-catalogs")
             compose.onNode(hasSetTextAction() and hasText("书源 JSON 地址")).performTextReplacement(server.url("/sources").toString())
-            compose.onNodeWithText("网络导入").performClick()
+            compose.onNodeWithText("导入并验证").performClick()
+            val browser = ViewModelProvider(compose.activity)[NovelViewModel::class.java]
+            waitForUi { browser.state.value.busy == null && browser.state.value.sources.any { it.name == "小说测试源" && it.check?.passed == false } }
+            compose.onNodeWithText("小说测试源").assertDoesNotExist()
+            compose.onNodeWithText("未通过").performClick()
+            compose.onNodeWithText("HTTP 404", substring = true).assertExists()
+            capture("novel-invalid-source")
+            healthy.set(true)
+            compose.onNodeWithContentDescription("验证 小说测试源").performClick()
+            waitForUi { browser.state.value.busy == null && browser.state.value.sources.any { it.name == "小说测试源" && it.check?.passed == true } }
+            compose.onNodeWithText("可用").performClick()
+            capture("novel-validated-sources")
             waitForUi { compose.onAllNodesWithText("小说测试源").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("更新当前小说源仓库").assertExists()
             compose.onNodeWithText("全部已导入").performClick()
@@ -107,6 +120,11 @@ class OnlineNovelFlowTest {
             assertTrue(exportProvider.directory.listFiles()!!.single { it.name.contains("第一章") }.readText().contains("第一章 测试"))
             compose.onNodeWithText("开始阅读").performScrollTo().performClick()
             waitForUi { vm.reader.value?.novelChapter != null }
+            val tokenBeforeRefresh = vm.reader.value!!.position.sessionId
+            compose.onRoot().performTouchInput { click(center) }
+            compose.onNodeWithContentDescription("阅读设置").performClick()
+            compose.onNodeWithText("重新加载正文").performScrollTo().performClick()
+            waitForUi { vm.reader.value != null && vm.reader.value!!.position.sessionId != tokenBeforeRefresh }
             val model = vm
             val book = model.reader.value!!.book
             val title = model.reader.value!!.novelTitle!!
@@ -138,10 +156,11 @@ class OnlineNovelFlowTest {
             capture("novel-online-downloaded")
             compose.onNodeWithContentDescription("返回小说源").performClick()
             compose.onNodeWithContentDescription("返回小说源").performClick()
+            compose.onNodeWithText(com.chen.myviewer.novel.novelCatalogName(server.url("/sources").toString())).performClick()
             compose.onNodeWithContentDescription("删除小说源 小说测试源").performClick()
             compose.onNodeWithText("删除").performClick()
             val novels = ViewModelProvider(compose.activity)[NovelViewModel::class.java]
-            waitForUi { novels.state.value.sources.isEmpty() }
+            waitForUi { novels.state.value.sources.none { it.id == title.sourceId } }
             server.shutdown()
             compose.onNodeWithText("书库").performClick()
             compose.onAllNodesWithText("原创联网小说").onLast().performClick()

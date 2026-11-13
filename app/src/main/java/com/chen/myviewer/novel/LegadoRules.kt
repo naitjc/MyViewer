@@ -14,8 +14,15 @@ internal class LegadoRules(private val variables: Map<String, Any> = emptyMap(),
     companion object {
         // Android ICU requires escaped closing braces in this expression.
         internal val TEMPLATE_PATTERN = Regex("\\{\\{([\\s\\S]*?)\\}\\}")
+        internal fun replaceText(text: String, pattern: String, replacement: String, firstMatch: Boolean = false): String = try {
+            val regex = Regex(pattern)
+            if (firstMatch) regex.find(text)?.value?.let { regex.replaceFirst(it, replacement) }.orEmpty() else regex.replace(text, replacement)
+        }
+        catch (error: StackOverflowError) { throw IllegalArgumentException("小说源正则递归过深，请更新书源。", error) }
     }
     private val stored = mutableMapOf<String, String>()
+    private var content: Any? = null
+    fun setContent(value: Any?) { content = value }
     private var deadline = Long.MAX_VALUE
     private val factory = object : ContextFactory() {
         override fun makeContext(): Context = super.makeContext().apply {
@@ -34,30 +41,35 @@ internal class LegadoRules(private val variables: Map<String, Any> = emptyMap(),
         deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
         return factory.call(ContextAction { cx ->
             val scope = cx.initSafeStandardObjects()
-            fun put(name: String, value: Any?) {
-                val js = if (value is JSONObject || value is JSONArray) cx.evaluateString(scope, "JSON.parse(${JSONObject.quote(value.toString())})", "novel-variable", 1, null) else Context.javaToJS(value, scope)
-                ScriptableObject.putProperty(scope, name, js)
-            }
-            fun function(action: (Array<out Any>) -> Any?): BaseFunction = object : BaseFunction() {
-                override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<out Any>): Any? { checkActive(); return action(args) }
-            }
+            val conversion = LegadoScriptValues(cx, scope, ::checkActive)
+            fun put(name: String, value: Any?) { ScriptableObject.putProperty(scope, name, conversion.toJs(value)) }
+            fun function(action: (Array<out Any>) -> Any?) = conversion.function(action)
             variables.forEach(::put)
+            (ScriptableObject.getProperty(scope, "book") as? Scriptable)?.let { book ->
+                val data = variables["book"] as? JSONObject
+                ScriptableObject.putProperty(book, "getBookUrl", function { data?.optString("bookUrl").orEmpty() })
+                ScriptableObject.putProperty(book, "getOrigin", function { data?.optString("origin").orEmpty() })
+            }
             put("baseUrl", baseUrl)
-            val input = when (result) { is Element -> result.outerHtml(); else -> result?.toString().orEmpty() }
-            put("result", input)
+            val sourceContent = content ?: result
+            put("result", result)
+            put("src", when (sourceContent) { is Element -> sourceContent.outerHtml(); else -> sourceContent?.toString().orEmpty() })
             val bridge = cx.newObject(scope)
             ScriptableObject.putProperty(bridge, "ajax", function { ajax(Context.toString(it.firstOrNull() ?: "")) })
-            ScriptableObject.putProperty(bridge, "getString", function { text(result, Context.toString(it.firstOrNull() ?: ""), baseUrl) })
-            ScriptableObject.putProperty(bridge, "getStringList", function { cx.newArray(scope, values(result, Context.toString(it.firstOrNull() ?: ""), baseUrl).map { value -> if (value is Element) value.text() else value.toString() }.toTypedArray()) })
+            ScriptableObject.putProperty(bridge, "getString", function { text(content ?: result, Context.toString(it.firstOrNull() ?: ""), baseUrl) })
+            ScriptableObject.putProperty(bridge, "getStringList", function { conversion.toJs(values(content ?: result, Context.toString(it.firstOrNull() ?: ""), baseUrl).map { value -> if (value is Element) value.text() else value.toString() }) })
             ScriptableObject.putProperty(bridge, "get", function { stored[Context.toString(it.firstOrNull() ?: "")] ?: "" })
             ScriptableObject.putProperty(bridge, "put", function { stored[Context.toString(it[0])] = Context.toString(it[1]); it[1] })
+            val getElements = function { conversion.toJs(values(content ?: result, Context.toString(it.firstOrNull() ?: ""), baseUrl)) }
+            ScriptableObject.putProperty(bridge, "getElement", getElements)
+            ScriptableObject.putProperty(bridge, "getElements", getElements)
+            ScriptableObject.putProperty(bridge, "setContent", function { content = conversion.fromJs(it.firstOrNull()); put("src", content); null })
+            ScriptableObject.putProperty(bridge, "log", function { null })
+            ScriptableObject.putProperty(bridge, "base64Decode", function { android.util.Base64.decode(Context.toString(it.firstOrNull() ?: ""), android.util.Base64.DEFAULT).toString(Charsets.UTF_8) })
+            ScriptableObject.putProperty(bridge, "base64Encode", function { android.util.Base64.encodeToString(Context.toString(it.firstOrNull() ?: "").toByteArray(), android.util.Base64.NO_WRAP) })
+            ScriptableObject.putProperty(bridge, "md5Encode", function { java.security.MessageDigest.getInstance("MD5").digest(Context.toString(it.firstOrNull() ?: "").toByteArray()).joinToString("") { byte -> "%02x".format(byte) } })
             ScriptableObject.putProperty(scope, "java", bridge)
-            val value = cx.evaluateString(scope, code, "novel-source", 1, null)
-            when (value) {
-                null, Undefined.instance -> ""
-                is Scriptable -> Context.toString(cx.evaluateString(scope.apply { ScriptableObject.putProperty(this, "__output", value) }, "JSON.stringify(__output)", "novel-result", 1, null))
-                else -> Context.toString(value)
-            }
+            conversion.fromJs(cx.evaluateString(scope, code, "novel-source", 1, null))
         })
     }
     fun template(rule: String, data: Any?, baseUrl: String): String = TEMPLATE_PATTERN.replace(rule) { match ->
@@ -69,10 +81,14 @@ internal class LegadoRules(private val variables: Map<String, Any> = emptyMap(),
         when (it) { is Element -> it.text(); else -> it.toString() }
     }.trim()
 
-    fun values(data: Any?, raw: String, baseUrl: String = ""): List<Any> {
+    fun values(data: Any?, raw: String, baseUrl: String = ""): List<Any> = try { evaluate(data, raw, baseUrl) }
+    catch (error: StackOverflowError) { throw IllegalArgumentException("小说源正则或脚本递归过深，请更新书源。", error) }
+
+    private fun evaluate(data: Any?, raw: String, baseUrl: String): List<Any> {
         var rule = raw.trim()
+        val templated = rule.contains("{{")
         if (rule.isEmpty()) return emptyList()
-        if (rule.contains("{{")) return listOf(template(rule, data, baseUrl))
+        if (rule.contains("{{")) rule = template(rule, data, baseUrl)
         if (rule.startsWith("@js:") || rule.startsWith("<js>")) {
             val code = rule.removePrefix("@js:").removePrefix("<js>").removeSuffix("</js>")
             return normalize(script(code, data, baseUrl))
@@ -80,18 +96,18 @@ internal class LegadoRules(private val variables: Map<String, Any> = emptyMap(),
         val scriptIndex = listOf(rule.indexOf("@js:"), rule.indexOf("<js>")).filter { it >= 0 }.minOrNull()
         if (scriptIndex != null) {
             val initial = text(data, rule.substring(0, scriptIndex), baseUrl)
-            return values(initial, rule.substring(scriptIndex), baseUrl)
+            return normalize(script(rule.substring(scriptIndex).removePrefix("@js:").removePrefix("<js>").removeSuffix("</js>"), initial, baseUrl))
         }
         if (rule.contains("||")) {
             for (alternative in rule.split("||")) values(data, alternative, baseUrl).takeIf { it.isNotEmpty() && it.any { value -> value.toString().isNotBlank() } }?.let { return it }
             return emptyList()
         }
         if (rule.contains("&&")) return rule.split("&&").flatMap { values(data, it, baseUrl) }
-        val replacements = rule.split("##", limit = 3)
+        val replacements = rule.split("##")
         rule = replacements.first()
-        val result = select(data, rule, baseUrl)
+        val result = if (templated && !rule.startsWith("@") && !rule.startsWith("<js>")) listOf(rule) else select(data, rule, baseUrl)
         if (replacements.size == 1) return result
-        return result.map { value -> Regex(replacements[1]).replace(if (value is Element) value.text() else value.toString(), replacements.getOrElse(2) { "" }) }
+        return result.map { value -> replaceText(if (value is Element) value.text() else value.toString(), replacements[1], replacements.getOrElse(2) { "" }, replacements.size > 3) }
     }
     private fun normalize(value: Any?): List<Any> = when (value) {
         null, JSONObject.NULL -> emptyList()
@@ -104,6 +120,7 @@ internal class LegadoRules(private val variables: Map<String, Any> = emptyMap(),
         else -> listOf(value)
     }
     private fun select(data: Any?, raw: String, baseUrl: String): List<Any> {
+        if (raw.isEmpty()) return normalize(data)
         if (raw == "all") return normalize(data)
         if (raw.startsWith("https://") || raw.startsWith("http://")) return listOf(raw)
         val rule = raw.removePrefix("@json:")

@@ -52,9 +52,7 @@ internal class LegadoEngine(private val source: NovelSource, private val http: S
         val response = http.request(url, requestHeaders, method, body)
         require(response.status in 200..299) { "小说网页请求失败（HTTP ${response.status}）。" }
         val contentType = response.headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value.orEmpty()
-        val detected = Regex("charset=[\"']?([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE).find(contentType)?.groupValues?.get(1)
-            ?: Regex("charset=[\"']?([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE).find(response.data.take(4096).toByteArray().toString(Charsets.ISO_8859_1))?.groupValues?.get(1)
-        return NovelResponse(response.url, response.data.toString(if (options.has("charset")) charset else detected?.let(Charset::forName) ?: Charsets.UTF_8))
+        return NovelResponse(response.url, NovelTextDecoder.decode(response.data, contentType, charset.name()))
     }
     fun search(keyword: String, pageNumber: Int): List<NovelBook> {
         key = keyword
@@ -62,6 +60,7 @@ internal class LegadoEngine(private val source: NovelSource, private val http: S
         variables["key"] = key
         variables["page"] = page
         val response = request(source.json.optString("searchUrl"), source.baseUrl)
+        analyzer.setContent(response.body)
         val rule = source.rule("ruleSearch")
         return analyzer.values(response.body, rule.optString("bookList"), response.url).mapNotNull { item ->
             val name = analyzer.text(item, rule.optString("name"), response.url)
@@ -75,6 +74,7 @@ internal class LegadoEngine(private val source: NovelSource, private val http: S
     fun details(novel: NovelBook): NovelBook {
         variables["book"] = novel.json().put("bookUrl", novel.url).put("origin", source.url)
         val response = request(novel.url, source.baseUrl)
+        analyzer.setContent(response.body)
         val info = source.rule("ruleBookInfo")
         val body = info.optString("init").takeIf { it.isNotBlank() }?.let { analyzer.values(response.body, it, response.url).firstOrNull() ?: response.body } ?: response.body
         fun value(name: String) = analyzer.text(body, info.optString(name), response.url)
@@ -89,6 +89,7 @@ internal class LegadoEngine(private val source: NovelSource, private val http: S
         val reverse = tocRule.optString("chapterList").startsWith('-')
         while (visited.add(current.url)) {
             require(visited.size <= 200) { "目录分页超过支持上限。" }
+            analyzer.setContent(current.body)
             val items = analyzer.values(current.body, tocRule.optString("chapterList").removePrefix("-").removePrefix("+"), current.url)
             for (item in items) {
                 val name = analyzer.text(item, tocRule.optString("chapterName"), current.url)
@@ -111,6 +112,9 @@ internal class LegadoEngine(private val source: NovelSource, private val http: S
     fun content(novel: NovelBook, chapter: NovelChapter): String {
         require(!chapter.locked) { "该章节需要站点授权。" }
         variables["book"] = novel.json().put("bookUrl", novel.url).put("origin", source.url).put("durChapterTitle", chapter.name)
+        variables["title"] = chapter.name
+        variables["chapter"] = chapter.json().put("title", chapter.name)
+        variables["nextChapterUrl"] = novel.chapters.getOrNull(novel.chapters.indexOfFirst { it.url == chapter.url } + 1)?.url.orEmpty()
         val rule = source.rule("ruleContent")
         val pages = mutableListOf<String>()
         val visited = mutableSetOf<String>()
@@ -118,6 +122,7 @@ internal class LegadoEngine(private val source: NovelSource, private val http: S
         var current = request(chapter.url, source.baseUrl)
         while (visited.add(current.url)) {
             require(visited.size <= 30) { "正文分页超过支持上限。" }
+            analyzer.setContent(current.body)
             val content = analyzer.text(current.body, rule.optString("content"), current.url)
             require(content.isNotBlank()) { "没有解析到章节正文，请检查书源或完成站点授权。" }
             val cleaned = Jsoup.parse(content.replace(Regex("(?i)<br\\s*/?>|</p>|</div>"), "\n")).apply { select("script,style,noscript").remove() }.wholeText().replace('\u00a0', ' ').trim()
@@ -132,8 +137,12 @@ internal class LegadoEngine(private val source: NovelSource, private val http: S
         var text = pages.joinToString("\n\n")
         val replace = rule.optString("replaceRegex")
         if (replace.isNotBlank()) for (entry in replace.split("&&")) {
-            val parts = entry.split("##", limit = 2)
-            text = Regex(parts[0]).replace(text, parts.getOrElse(1) { "" })
+            val specification = analyzer.template(entry, text, current.url)
+            text = if (specification.startsWith("@js:") || specification.startsWith("<js>")) analyzer.text(text, specification, current.url)
+            else {
+                val parts = specification.removePrefix("##").split("##")
+                LegadoRules.replaceText(text, parts[0], parts.getOrElse(1) { "" }, parts.size > 2)
+            }
         }
         require(text.isNotBlank()) { "该章节没有可阅读的正文。" }
         return text

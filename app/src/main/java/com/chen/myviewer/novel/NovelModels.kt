@@ -4,13 +4,20 @@ import com.chen.myviewer.data.Book
 import com.chen.myviewer.reader.comic.ComicArchive
 import org.json.JSONArray
 import org.json.JSONObject
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 data class NovelSource(val json: JSONObject) {
     val url: String get() = json.getString("bookSourceUrl")
     val id: String get() = ComicArchive.digest(url)
     val name: String get() = json.getString("bookSourceName")
     val catalog: String? get() = json.optString("_myviewerCatalog").takeIf { it.isNotBlank() }
+    val fingerprint: String by lazy { novelSourceFingerprint(json) }
+    val check: NovelSourceCheck? get() = json.optJSONObject("_myviewerCheck")?.let { runCatching { NovelSourceCheck.fromJson(it) }.getOrNull() }
+        ?.takeIf { it.fingerprint == fingerprint }
     val baseUrl: String get() = url.substringBefore('#')
+    val originKey: String get() = baseUrl.toHttpUrlOrNull()?.let {
+        it.host + (if (it.port in setOf(80, 443)) "" else ":${it.port}") + it.encodedPath.trimEnd('/')
+    } ?: baseUrl.trimEnd('/')
     fun rule(group: String): JSONObject = json.optJSONObject(group)
         ?: json.optString(group).takeIf { it.startsWith('{') }?.let(::JSONObject) ?: JSONObject()
 }

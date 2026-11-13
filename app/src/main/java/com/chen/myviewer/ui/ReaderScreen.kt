@@ -202,6 +202,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (session.text != null) {
                                 ReadingSettings(settings, vm::updateSettings, session.preferences.mode, vm::mode)
+                                if (session.novelTitle != null) TextButton(onClick = { textView?.flush(); sheet = null; vm.refreshNovelChapter() }) { Text("重新加载正文") }
                                 if (session.novelTitle == null) {
                                 var more by remember { mutableStateOf(false) }
                                 TextButton(onClick = { more = !more }) { Text("更多设置") }

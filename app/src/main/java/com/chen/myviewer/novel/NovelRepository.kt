@@ -9,10 +9,11 @@ import com.chen.myviewer.reader.text.TextDocument
 import com.chen.myviewer.reader.text.Chapter
 import com.chen.myviewer.source.SourceHttp
 import com.chen.myviewer.source.atomicWrite
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -23,8 +24,74 @@ class NovelRepository internal constructor(private val context: Context, private
     private val sourceFile = File(root, "sources.json")
     private val lock = Mutex()
     private val preferences = context.getSharedPreferences("novel-catalogs", Context.MODE_PRIVATE)
-    val catalogFilter: String? get() = preferences.getString("filter", null)
-    fun setCatalogFilter(url: String?) { preferences.edit { putString("filter", url) } }
+    private val integrated by lazy { JSONObject(context.assets.open("novel-sources.json").bufferedReader().use { it.readText() }) }
+    private val knownChecks by lazy {
+        val values = integrated.getJSONArray("checks")
+        (0 until values.length()).map { values.getJSONObject(it) }.associate { entry ->
+            val check = NovelSourceCheck.fromJson(entry.getJSONObject("check"))
+            entry.getString("id") + check.fingerprint to check
+        }
+    }
+    val catalogFilter: String? get() = preferences.getString("filter", INTEGRATED_NOVEL_CATALOG)?.takeUnless { it == "__all__" }
+    fun setCatalogFilter(url: String?) { preferences.edit { putString("filter", url ?: "__all__") } }
+
+    suspend fun installIntegrated(force: Boolean = false) = lock.withLock {
+        runInterruptible(Dispatchers.IO) {
+            if (preferences.getInt("decoder", 0) < 1) {
+                File(context.cacheDir, "novel-chapters").deleteRecursively()
+                preferences.edit { putInt("decoder", 1) }
+            }
+            val version = integrated.getLong("checkedAt")
+            if (!force && preferences.getLong("snapshot", 0) == version) return@runInterruptible
+            if (preferences.getLong("snapshot", 0) == 0L) setCatalogFilter(INTEGRATED_NOVEL_CATALOG)
+            val merged = sources().associateBy { it.id }.toMutableMap()
+            val bundled = parseSources(integrated.getJSONArray("sources").toString())
+            bundled.forEach { source ->
+                val previous = merged[source.id]
+                if (previous == null || previous.fingerprint == source.fingerprint) {
+                    source.json.put("_myviewerCatalog", INTEGRATED_NOVEL_CATALOG)
+                    previous?.check?.let { source.json.put("_myviewerCheck", it.json()) }
+                    merged[source.id] = source
+                }
+            }
+            merged.values.forEach(::applyKnownCheck)
+            synchronized(sourceFile.absolutePath.intern()) { atomicWrite(sourceFile, JSONArray(merged.values.map { it.json }).toString().toByteArray()) }
+            preferences.edit { putLong("snapshot", version) }
+        }
+    }
+
+    private fun applyKnownCheck(source: NovelSource) {
+        val check = knownChecks[source.id + source.fingerprint] ?: return
+        if ((source.check?.checkedAt ?: 0) <= check.checkedAt) source.json.put("_myviewerCheck", check.json())
+    }
+
+    suspend fun validate(candidates: List<NovelSource>, progress: (Int, Int, String) -> Unit) = coroutineScope {
+        val completed = java.util.concurrent.ConcurrentLinkedQueue<Pair<NovelSource, NovelSourceCheck>>()
+        val count = java.util.concurrent.atomic.AtomicInteger()
+        val gate = Semaphore(4)
+        try {
+            candidates.map { source -> async {
+                gate.withPermit {
+                    val check = NovelSourceValidator(http).check(source)
+                    completed.add(source to check)
+                    progress(count.incrementAndGet(), candidates.size, source.name)
+                }
+            } }.awaitAll()
+        } finally {
+            withContext(NonCancellable) {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = sources().associateBy { it.id }.toMutableMap()
+                        completed.forEach { (source, check) ->
+                            current[source.id]?.takeIf { it.fingerprint == check.fingerprint }?.json?.put("_myviewerCheck", check.json())
+                        }
+                        synchronized(sourceFile.absolutePath.intern()) { atomicWrite(sourceFile, JSONArray(current.values.map { it.json }).toString().toByteArray()) }
+                    }
+                }
+            }
+        }
+        Unit
+    }
 
     fun sources(): List<NovelSource> = synchronized(sourceFile.absolutePath.intern()) {
         if (!sourceFile.exists()) emptyList() else parseSources(sourceFile.readText())
@@ -43,6 +110,9 @@ class NovelRepository internal constructor(private val context: Context, private
                 val existing = sources().associateBy { it.id }
                 imported.forEach { source ->
                     val origin = catalog ?: existing[source.id]?.catalog
+                    source.json.remove("_myviewerCheck")
+                    existing[source.id]?.takeIf { it.fingerprint == source.fingerprint }?.check?.let { source.json.put("_myviewerCheck", it.json()) }
+                    applyKnownCheck(source)
                     if (origin != null) source.json.put("_myviewerCatalog", origin)
                 }
                 val merged = (existing.values + imported).associateBy { it.id }.values
@@ -96,6 +166,16 @@ class NovelRepository internal constructor(private val context: Context, private
             file.setLastModified(System.currentTimeMillis())
             if (file == cache) trimCache(cache)
             TextDocument(text, listOf(Chapter(chapter.name, 0)), "UTF-8")
+        }
+    }
+    suspend fun refreshChapter(title: NovelTitle, chapter: NovelChapter) {
+        runInterruptible(Dispatchers.IO) {
+            val permanent = downloadedFile(title.book.id, chapter.url)
+            val file = if (permanent.exists()) permanent else chapterFile(title.book.id, chapter.url)
+            synchronized(file.absolutePath.intern()) {
+                val text = LegadoEngine(source(title.sourceId), http).content(title.novel, chapter)
+                atomicWrite(file, text.toByteArray(Charsets.UTF_8))
+            }
         }
     }
     private fun trimCache(keep: File) {
