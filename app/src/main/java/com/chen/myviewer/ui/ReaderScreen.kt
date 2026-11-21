@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -102,19 +103,38 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
         } else if (session.comic != null) ComicContent(vm, session, settings, automatic, finish, { pauseAutomatic(); menu = !menu })
 
         if (menu) {
-            MaterialTheme(colorScheme = if (session.comic != null) darkColorScheme(primary = Color(0xFFA8CAB2), surface = Color(0xFF171D1A), onSurface = Color.White) else MaterialTheme.colorScheme) {
+            MaterialTheme(
+                colorScheme = if (session.comic != null) darkColorScheme(
+                    primary = Color(0xFF8EC5A5),
+                    onPrimary = Color(0xFF0D2619),
+                    surface = Color(0xFF171D1A),
+                    surfaceContainerLowest = Color(0xFF181F1C),
+                    onSurface = Color.White,
+                    outlineVariant = Color(0xFF2E3B34),
+                ) else MaterialTheme.colorScheme
+            ) {
             Surface(Modifier.align(Alignment.TopCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f), contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = 3.dp) {
-                Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = close) { Icon(Icons.Outlined.ArrowBack, "返回书架") }
-                    Column(Modifier.weight(1f)) {
-                        Text(session.book.title, maxLines = 1, style = MaterialTheme.typography.titleMedium)
-                        session.chapter?.let { Text(it.label, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
-                        session.novelChapter?.let { Text(it.name, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
+                Column {
+                    Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = close) { Icon(Icons.Outlined.ArrowBack, "返回书架") }
+                        Column(Modifier.weight(1f)) {
+                            Text(session.book.title, maxLines = 1, style = MaterialTheme.typography.titleMedium)
+                            session.chapter?.let { Text(it.label, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
+                            session.novelChapter?.let { Text(it.name, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
+                        }
+                        if (session.text != null) IconButton(onClick = { sheet = "bookmarks" }) { Icon(Icons.Outlined.BookmarkBorder, "查看书签") }
                     }
-                    if (session.text != null) IconButton(onClick = { sheet = "bookmarks" }) { Icon(Icons.Outlined.BookmarkBorder, "查看书签") }
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                 }
             }
-            Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { menuHeight = it.height }, color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = 5.dp) {
+            Surface(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { menuHeight = it.height },
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                shadowElevation = 5.dp
+            ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     session.onlineTitle?.let { title ->
                         val chapters = title.manga.chapters.orEmpty().asReversed()

@@ -4,6 +4,7 @@ package com.chen.myviewer.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.Image
@@ -11,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -27,9 +29,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.chen.myviewer.download.FolderDownloadViewModel
@@ -99,25 +103,70 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
     val commonLanguages = listOf("zh", "en", "ja", "ko")
     val otherLanguages = languages.filterNot { it in commonLanguages }
     LaunchedEffect(state.busy) { if (state.catalog.isEmpty() && state.busy == null && state.error == null) vm.loadCatalog() }
-    Column {
+    Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("发现", Modifier.weight(1f).clearAndSetSemantics { contentDescription = "发现"; heading() }, style = MaterialTheme.typography.headlineSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            Text(
+                "发现",
+                Modifier.weight(1f).clearAndSetSemantics { contentDescription = "发现"; heading() },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.3).sp
+            )
             IconButton(onClick = { vm.loadCatalog(true) }, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新源仓库") }
             IconButton(onClick = repository) { Icon(Icons.Outlined.Settings, "管理源仓库") }
         }
         catalogHeader()
-        OutlinedTextField(query, { query = it }, placeholder = { Text("搜索漫画源") }, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
-            colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)), singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), leadingIcon = { Icon(Icons.Outlined.Search, null) })
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(state.language.isEmpty(), { vm.language("") }, label = { Text("全部语言") }, shape = androidx.compose.foundation.shape.RoundedCornerShape(50), colors = shelfChipColors())
+        OutlinedTextField(
+            query,
+            { query = it },
+            placeholder = { Text("搜索漫画源", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)) },
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f),
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+            ),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "清空搜索") } }
+        )
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val allSelected = state.language.isEmpty()
+            FilterChip(
+                selected = allSelected,
+                onClick = { vm.language("") },
+                label = { Text("全部语言", fontWeight = if (allSelected) FontWeight.SemiBold else FontWeight.Normal) },
+                shape = RoundedCornerShape(50),
+                colors = shelfChipColors(),
+                border = shelfChipBorder(allSelected)
+            )
             commonLanguages.filter { it == "zh" || it in languages }.forEach { language ->
-                FilterChip(state.language == language, { vm.language(language) }, label = { Text(sourceLanguageLabel(language)) }, shape = androidx.compose.foundation.shape.RoundedCornerShape(50), colors = shelfChipColors())
+                val selected = state.language == language
+                FilterChip(
+                    selected = selected,
+                    onClick = { vm.language(language) },
+                    label = { Text(sourceLanguageLabel(language), fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
+                    shape = RoundedCornerShape(50),
+                    colors = shelfChipColors(),
+                    border = shelfChipBorder(selected)
+                )
             }
             if (otherLanguages.isNotEmpty()) Box {
                 val selected = state.language in otherLanguages
-                FilterChip(selected, { languageMenu = true }, shape = androidx.compose.foundation.shape.RoundedCornerShape(50), colors = shelfChipColors(),
-                    label = { Text(if (selected) sourceLanguageLabel(state.language) else "更多语言") },
-                    trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null) })
+                FilterChip(
+                    selected = selected,
+                    onClick = { languageMenu = true },
+                    shape = RoundedCornerShape(50),
+                    colors = shelfChipColors(),
+                    border = shelfChipBorder(selected),
+                    label = { Text(if (selected) sourceLanguageLabel(state.language) else "更多语言", fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
+                    trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null) }
+                )
                 DropdownMenu(languageMenu, { languageMenu = false }, modifier = Modifier.heightIn(max = 360.dp)) {
                     otherLanguages.forEach { language ->
                         DropdownMenuItem(text = { Text(sourceLanguageLabel(language)) },
@@ -137,26 +186,65 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
             } else EmptyState("没有匹配的漫画源", "可以选择其他语言或调整源名称。", Icons.Outlined.SearchOff) {
                 TextButton(onClick = { query = ""; vm.language("") }) { Text("清除筛选") }
             }
-        } else LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+        } else LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(entries, key = { it.id }) { entry ->
                 val local = installed[entry.id]
-                Row(Modifier.fillMaxWidth().clickable(enabled = local != null && state.busy == null) { vm.choose(local!!.entry) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                        Icon(Icons.Outlined.Public, null, Modifier.padding(10.dp).size(24.dp), tint = MaterialTheme.colorScheme.primary)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(entry.name, style = MaterialTheme.typography.titleMedium)
-                        Text("${entry.languages.joinToString(" / ")} · v${entry.version}${if (local != null) " · 已安装" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (local == null) FilledTonalButton(onClick = { vm.install(entry) }, enabled = state.busy == null) { Text("安装") }
-                    else if (local.entry.version < entry.version) TextButton(onClick = { vm.install(entry) }, enabled = state.busy == null) { Text("更新") }
-                    else TextButton(onClick = { vm.choose(local.entry) }, enabled = state.busy == null, modifier = Modifier.semantics { contentDescription = "浏览 ${entry.name}" }) { Text("浏览") }
-                    if (local != null) IconButton(onClick = { removingSource = local.entry }, enabled = state.busy == null) {
-                        Icon(Icons.Outlined.DeleteOutline, "卸载 ${entry.name}")
+                val monogram = entry.name.trim().take(1).uppercase()
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
+                    shadowElevation = 0.5.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable(enabled = local != null && state.busy == null) { vm.choose(local!!.entry) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (local != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (monogram.isNotBlank()) Text(
+                                    monogram,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                ) else Icon(
+                                    Icons.Outlined.Public,
+                                    null,
+                                    Modifier.size(22.dp),
+                                    tint = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(entry.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "${entry.languages.joinToString(" / ")} · v${entry.version}${if (local != null) " · 已安装" else ""}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (local == null) FilledTonalButton(
+                            onClick = { vm.install(entry) },
+                            enabled = state.busy == null,
+                            shape = RoundedCornerShape(50),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        ) { Text("安装") }
+                        else if (local.entry.version < entry.version) TextButton(onClick = { vm.install(entry) }, enabled = state.busy == null) { Text("更新") }
+                        else TextButton(onClick = { vm.choose(local.entry) }, enabled = state.busy == null, modifier = Modifier.semantics { contentDescription = "浏览 ${entry.name}" }) { Text("浏览", fontWeight = FontWeight.SemiBold) }
+                        if (local != null) IconButton(onClick = { removingSource = local.entry }, enabled = state.busy == null) {
+                            Icon(Icons.Outlined.DeleteOutline, "卸载 ${entry.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
             }
         }
     }
@@ -169,24 +257,48 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
 
 @Composable
 private fun SourceSearch(vm: SourceViewModel, state: SourceBrowserState) {
-    Column {
-        OutlinedTextField(state.query, vm::query, label = { Text("搜索 ${state.source!!.name} 的漫画") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(16.dp), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { vm.search() }), trailingIcon = {
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            state.query,
+            vm::query,
+            placeholder = { Text("搜索 ${state.source!!.name} 的漫画") },
+            singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f),
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { vm.search() }),
+            trailingIcon = {
                 IconButton(onClick = { vm.search() }, enabled = state.busy == null) { Icon(Icons.Outlined.Search, "搜索漫画") }
-            })
+            }
+        )
         if (state.results.isEmpty() && state.busy == null) {
             EmptyState("暂无搜索结果", "输入漫画名称搜索，或重试当前请求。", Icons.Outlined.Search) {
                 Button(onClick = { vm.search() }) { Text("重试") }
             }
-        } else LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+        } else LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(state.results, key = { it.key }) { manga ->
-                Row(Modifier.fillMaxWidth().clickable(enabled = state.busy == null) { vm.show(manga) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    OnlineCover(vm.repository, manga.cover, Modifier.width(64.dp))
-                    Column(Modifier.weight(1f).padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(manga.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (manga.authors.isNotEmpty()) Text(manga.authors.joinToString(" / "), style = MaterialTheme.typography.bodySmall)
-                        manga.description?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Surface(
+                    onClick = { vm.show(manga) },
+                    enabled = state.busy == null,
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
+                    shadowElevation = 0.5.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OnlineCover(vm.repository, manga.cover, Modifier.width(64.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(manga.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (manga.authors.isNotEmpty()) Text(manga.authors.joinToString(" / "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            manga.description?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
                     }
                 }
             }
@@ -208,56 +320,89 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
     val selected = chapters.firstOrNull { it.key == last?.chapterKey } ?: chapters.lastOrNull()
     val progress = positions.associateBy(ChapterPosition::chapterKey)
     var deleteChapter by remember { mutableStateOf<SourceChapter?>(null) }
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                OnlineCover(vm.repository, title.manga.cover, Modifier.width(105.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(title.manga.title, style = MaterialTheme.typography.titleLarge)
-                    Text(title.manga.authors.joinToString(" / "), style = MaterialTheme.typography.bodyMedium)
-                    Text(title.sourceId, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                    FilledTonalButton(onClick = vm::addToShelf, enabled = !book.onShelf && state.busy == null) { Text(if (book.onShelf) "已加入书架" else "加入书架") }
-                    if (book.completed) Text("已读完", color = MaterialTheme.colorScheme.primary)
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
+                shadowElevation = 0.5.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    OnlineCover(vm.repository, title.manga.cover, Modifier.width(105.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(title.manga.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        if (title.manga.authors.isNotEmpty()) Text(title.manga.authors.joinToString(" / "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainer) {
+                            Text(title.sourceId, Modifier.padding(horizontal = 8.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                        }
+                        FilledTonalButton(onClick = vm::addToShelf, enabled = !book.onShelf && state.busy == null, shape = RoundedCornerShape(50)) {
+                            Text(if (book.onShelf) "已加入书架" else "加入书架")
+                        }
+                        if (book.completed) Text("已读完", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
-        title.manga.description?.takeIf { it.isNotBlank() }?.let { description -> item { Text(description, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodyMedium) } }
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("章节 · ${chapters.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                if (selected != null) Button(onClick = { reader.open(title.book, title, selected) }, enabled = state.busy == null) { Text(if (last?.chapterKey.isNullOrBlank()) "开始阅读" else "继续阅读") }
+        title.manga.description?.takeIf { it.isNotBlank() }?.let { description ->
+            item {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                    Text(description, Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
         item {
-            OutlinedButton(onClick = { chooseFolder(null) }, enabled = !exportState.running && chapters.any { !it.locked }) {
-                Icon(Icons.Outlined.FolderOpen, null)
-                Spacer(Modifier.width(8.dp))
-                Text("下载整本到文件夹")
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("章节 · ${chapters.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                if (selected != null) Button(onClick = { reader.open(title.book, title, selected) }, enabled = state.busy == null, shape = RoundedCornerShape(50)) {
+                    Text(if (last?.chapterKey.isNullOrBlank()) "开始阅读" else "继续阅读")
+                }
             }
-            Text("整本合并为一个 ZIP，含 ${chapters.count { !it.locked }} 个可读章节。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item {
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(onClick = { chooseFolder(null) }, enabled = !exportState.running && chapters.any { !it.locked }, shape = RoundedCornerShape(50)) {
+                        Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("下载整本到文件夹")
+                    }
+                    Text("整本合并为一个 ZIP，含 ${chapters.count { !it.locked }} 个可读章节。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
         if (chapters.isEmpty()) item { TextButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Text("刷新章节列表") } }
         items(chapters, key = { it.key }) { chapter ->
             val saved = progress[chapter.key]
             val completed = saved?.completed == true
             val downloaded = chapter.key in state.downloaded
-            Row(Modifier.fillMaxWidth().clickable(enabled = !chapter.locked && state.busy == null) { reader.open(title.book, title, chapter) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(chapter.label, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    val status = listOfNotNull(if (chapter.locked) "已锁定" else null, if (downloaded) "已下载" else null,
-                        when {
-                            completed -> "已读完"
-                            saved?.completed == false -> "未读完"
-                            saved != null -> "已读 ${(saved.progress * 100).toInt()}%"
-                            else -> null
-                        }).joinToString(" · ")
-                    if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().clickable(enabled = !chapter.locked && state.busy == null) { reader.open(title.book, title, chapter) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(chapter.label, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+                        val status = listOfNotNull(if (chapter.locked) "已锁定" else null, if (downloaded) "已下载" else null,
+                            when {
+                                completed -> "已读完"
+                                saved?.completed == false -> "未读完"
+                                saved != null -> "已读 ${(saved.progress * 100).toInt()}%"
+                                else -> null
+                            }).joinToString(" · ")
+                        if (status.isNotBlank()) Text(status, color = if (completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                    IconButton(onClick = { chooseFolder(chapter.key) }, enabled = !chapter.locked && !exportState.running) { Icon(Icons.Outlined.FolderOpen, "保存 ${chapter.label} 到文件夹") }
+                    if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = state.downloadStatus == null) { Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载") }
+                    else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked && state.downloadStatus == null) { Icon(Icons.Outlined.Download, "下载 ${chapter.label}") }
                 }
-                IconButton(onClick = { chooseFolder(chapter.key) }, enabled = !chapter.locked && !exportState.running) { Icon(Icons.Outlined.FolderOpen, "保存 ${chapter.label} 到文件夹") }
-                if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = state.downloadStatus == null) { Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载") }
-                else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked && state.downloadStatus == null) { Icon(Icons.Outlined.Download, "下载 ${chapter.label}") }
             }
-            HorizontalDivider()
         }
     }
     deleteChapter?.let { chapter -> AlertDialog(onDismissRequest = { deleteChapter = null }, title = { Text("删除章节下载") }, text = { Text(chapter.label) },
@@ -271,7 +416,13 @@ private fun OnlineCover(repository: SourceRepository, url: String?, modifier: Mo
             catch (error: kotlinx.coroutines.CancellationException) { throw error }
             catch (error: Exception) { null }
     }
-    Surface(modifier.aspectRatio(.72f), shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer) {
+    Surface(
+        modifier.aspectRatio(.72f),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shadowElevation = 2.dp,
+        border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+    ) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.AutoStories, null, tint = MaterialTheme.colorScheme.onSecondaryContainer) }
     }

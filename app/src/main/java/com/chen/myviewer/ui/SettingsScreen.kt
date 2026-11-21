@@ -7,9 +7,11 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -33,13 +35,28 @@ import com.chen.myviewer.data.ReaderSettings
 @Composable
 internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns: Int, onColumns: (Int) -> Unit, expanded: List<String>, onToggleSection: (String) -> Unit) {
     val folders by vm.folders.collectAsStateWithLifecycle()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
         item(key = "layout") {
             PreferenceCard("书架布局", "每行 $columns 本", Icons.Outlined.GridView, "layout" in expanded, { onToggleSection("layout") }) {
                 for (row in listOf(1..3, 4..6)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { count -> FilterChip(selected = columns == count, onClick = { onColumns(count) },
-                            label = { Text("$count 本") }, leadingIcon = { if (columns == count) Icon(Icons.Outlined.Check, null, Modifier.size(16.dp)) }, modifier = Modifier.weight(1f)) }
+                        row.forEach { count ->
+                            val selected = columns == count
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onColumns(count) },
+                                label = { Text("$count 本", fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
+                                leadingIcon = { if (selected) Icon(Icons.Outlined.Check, null, Modifier.size(16.dp)) },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = shelfChipColors(),
+                                border = shelfChipBorder(selected),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
                 Text("本数越少，封面越大。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -81,7 +98,7 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
         item(key = "storage") {
             PreferenceCard("存储管理", "清理可重新生成的临时图片", Icons.Outlined.CleaningServices, "storage" in expanded, { onToggleSection("storage") }) {
                 Text("书籍、进度和书签会保留，漫画图片在阅读时重新加载。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onClick = { vm.clearComicCache() }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.DeleteSweep, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("清理漫画图片缓存") }
+                OutlinedButton(onClick = { vm.clearComicCache() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Outlined.DeleteSweep, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("清理漫画图片缓存") }
             }
         }
         item(key = "about") {
@@ -96,22 +113,46 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
 @Composable
 private fun PreferenceCard(title: String, subtitle: String, icon: ImageVector, expanded: Boolean, onToggle: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(180), label = "设置分组箭头")
-    Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
+        shadowElevation = 0.5.dp
+    ) {
         Column {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
-            Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = if (expanded) "收起$title" else "展开$title", onClick = onToggle)
-                .semantics { contentDescription = "${title}分组"; stateDescription = if (expanded) "已展开" else "已收起" }.padding(vertical = 16.dp, horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(icon, null, Modifier.padding(end = 4.dp).size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
+            Row(
+                Modifier.fillMaxWidth()
+                    .clickable(role = Role.Button, onClickLabel = if (expanded) "收起$title" else "展开$title", onClick = onToggle)
+                    .semantics { contentDescription = "${title}分组"; stateDescription = if (expanded) "已展开" else "已收起" }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(icon, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Icon(Icons.Outlined.ExpandMore, null, Modifier.size(22.dp).rotate(arrow), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            androidx.compose.animation.AnimatedVisibility(visible = expanded,
-                enter = expandVertically(tween(180)) + fadeIn(tween(180)), exit = shrinkVertically(tween(140)) + fadeOut(tween(140))) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(tween(180)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(140)) + fadeOut(tween(140))
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+                }
             }
         }
     }

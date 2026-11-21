@@ -2,6 +2,7 @@ package com.chen.myviewer.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.shape.CircleShape
@@ -39,11 +40,23 @@ private val ReadingPalettes = listOf(
 fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit, readingMode: String? = null, onMode: (String) -> Unit = {}) {
     val palette = ReadingPalettes.firstOrNull { it.id == settings.background } ?: ReadingPalettes.first()
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Surface(shape = RoundedCornerShape(16.dp), color = palette.paper, border = BorderStroke(1.dp, palette.ink.copy(alpha = .08f)), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("阅读预览", style = MaterialTheme.typography.labelSmall, color = palette.ink.copy(alpha = .6f))
-                Text("雨停时，故事刚好翻到下一页。", fontFamily = FontFamily.Serif, fontSize = settings.fontSize.sp,
-                    lineHeight = (settings.fontSize * settings.lineSpacing).sp, maxLines = 3, color = palette.ink)
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = palette.paper,
+            border = BorderStroke(1.dp, palette.ink.copy(alpha = .12f)),
+            shadowElevation = 0.5.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("阅读预览", style = MaterialTheme.typography.labelSmall, color = palette.ink.copy(alpha = .58f))
+                Text(
+                    "雨停时，故事刚好翻到下一页。",
+                    fontFamily = FontFamily.Serif,
+                    fontSize = settings.fontSize.sp,
+                    lineHeight = (settings.fontSize * settings.lineSpacing).sp,
+                    maxLines = 3,
+                    color = palette.ink
+                )
             }
         }
         SettingSlider("字号", settings.fontSize, "${settings.fontSize.roundToInt()} 号", 14f..36f, 1f) { update(settings.copy(fontSize = it)) }
@@ -52,11 +65,32 @@ fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit, 
             Text("阅读背景", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ReadingPalettes.forEach { choice ->
-                    Surface(onClick = { update(settings.copy(background = choice.id)) }, modifier = Modifier.weight(1f).height(48.dp).semantics { selected = palette.id == choice.id }, shape = RoundedCornerShape(24.dp), color = choice.paper,
-                        border = BorderStroke(if (palette.id == choice.id) 2.dp else 1.dp, if (palette.id == choice.id) MaterialTheme.colorScheme.primary else choice.ink.copy(alpha = .15f))) {
-                        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                            Box(Modifier.height(16.dp)) { if (palette.id == choice.id) Icon(Icons.Outlined.Check, null, Modifier.size(15.dp), tint = choice.ink) }
-                            Text(choice.label, fontSize = 12.sp, color = choice.ink)
+                    val selected = palette.id == choice.id
+                    Surface(
+                        onClick = { update(settings.copy(background = choice.id)) },
+                        modifier = Modifier.weight(1f).height(58.dp).semantics { this.selected = selected },
+                        shape = RoundedCornerShape(14.dp),
+                        color = choice.paper,
+                        border = BorderStroke(
+                            if (selected) 2.dp else 1.dp,
+                            if (selected) MaterialTheme.colorScheme.primary else choice.ink.copy(alpha = .16f)
+                        )
+                    ) {
+                        Column(
+                            Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            if (selected) {
+                                Icon(Icons.Outlined.Check, null, Modifier.size(15.dp), tint = choice.ink)
+                                Spacer(Modifier.height(2.dp))
+                            }
+                            Text(
+                                choice.label,
+                                fontSize = 12.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                color = choice.ink
+                            )
                         }
                     }
                 }
@@ -67,7 +101,16 @@ fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit, 
             Text("翻页动画", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("SLIDE" to "平移", "CURL" to "仿真翻书").forEach { (id, label) ->
-                    FilterChip(settings.animation == id, { update(settings.copy(animation = id)) }, label = { Text(label) }, modifier = Modifier.weight(1f))
+                    val selected = settings.animation == id
+                    FilterChip(
+                        selected = selected,
+                        onClick = { update(settings.copy(animation = id)) },
+                        label = { Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = shelfChipColors(),
+                        border = shelfChipBorder(selected),
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }
@@ -79,8 +122,8 @@ fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit, 
 private fun SettingValue(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .08f)) {
-            Text(value, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .1f)) {
+            Text(value, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -94,6 +137,7 @@ internal fun ReaderSlider(value: Float, onChange: (Float) -> Unit, modifier: Mod
     val dragging by interaction.collectIsDraggedAsState()
     val active = MaterialTheme.colorScheme.primary
     val inactive = MaterialTheme.colorScheme.outlineVariant
+    val thumbRing = MaterialTheme.colorScheme.surfaceContainerLowest
     Slider(value, onChange, modifier.heightIn(min = 48.dp), valueRange = range, steps = steps,
         onValueChangeFinished = onFinished, interactionSource = interaction,
         thumb = {
@@ -103,14 +147,14 @@ internal fun ReaderSlider(value: Float, onChange: (Float) -> Unit, modifier: Mod
                         Text(valueLabel, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
                     }
                 }
-                Box(Modifier.size(20.dp).background(active, CircleShape))
+                Box(Modifier.size(20.dp).background(active, CircleShape).border(2.dp, thumbRing, CircleShape))
             }
         }, track = { state ->
-            Canvas(Modifier.fillMaxWidth().height(4.dp)) {
+            Canvas(Modifier.fillMaxWidth().height(5.dp)) {
                 val fraction = ((state.value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
                 drawLine(inactive, Offset(0f, center.y), Offset(size.width, center.y), strokeWidth = size.height, cap = androidx.compose.ui.graphics.StrokeCap.Round)
                 drawLine(active, Offset(0f, center.y), Offset(size.width * fraction, center.y), strokeWidth = size.height, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                if (steps > 0) for (index in 0..steps + 1) {
+                if (steps in 1..8) for (index in 0..steps + 1) {
                     val position = index.toFloat() / (steps + 1)
                     drawCircle(if (position <= fraction) active else inactive, radius = 3.dp.toPx(), center = Offset(size.width * position, center.y))
                 }
@@ -135,8 +179,9 @@ internal fun SettingSlider(label: String, value: Float, valueLabel: String, rang
 internal fun BrightnessSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit) {
     Column {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("亮度", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Text(if (settings.brightness < 0) "跟随系统" else "${(settings.brightness * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall)
+            Text("亮度", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(if (settings.brightness < 0) "跟随系统" else "${(settings.brightness * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(8.dp))
             Switch(settings.brightness < 0, { update(settings.copy(brightness = if (it) -1f else .5f)) }, Modifier.semantics { contentDescription = "亮度跟随系统" })
         }
         if (settings.brightness >= 0) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -149,11 +194,20 @@ internal fun BrightnessSettings(settings: ReaderSettings, update: (ReaderSetting
 
 @Composable
 internal fun ReaderChoice(label: String, options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             options.forEach { (id, text) ->
-                FilterChip(selected == id, { onSelect(id) }, label = { Text(text) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), colors = shelfChipColors())
+                val isSelected = selected == id
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { onSelect(id) },
+                    label = { Text(text, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = shelfChipColors(),
+                    border = shelfChipBorder(isSelected)
+                )
             }
         }
     }
