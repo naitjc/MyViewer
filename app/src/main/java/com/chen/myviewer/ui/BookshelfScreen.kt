@@ -6,20 +6,29 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -39,6 +48,7 @@ internal fun Bookshelf(
     var sortMenu by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
+    val haptic = LocalHapticFeedback.current
     val term = query.trim()
     val shown = books.filter {
         (filter == "全部" || (filter == "小说" && it.book.kind == "TEXT") || (filter == "漫画" && it.book.kind == "COMIC")) &&
@@ -60,76 +70,114 @@ internal fun Bookshelf(
         return
     }
     Column(Modifier.fillMaxSize()) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) {
-            OutlinedTextField(
-                query,
-                onQuery,
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "搜索书名" },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                placeholder = { Text("搜索书名", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)) },
-                leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQuery("") }) { Icon(Icons.Outlined.Close, "清空书名搜索") } },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); keyboard?.hide() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f),
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+        Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CompactSearchField(
+                    value = query,
+                    onValueChange = onQuery,
+                    placeholder = "搜索书名",
+                    modifier = Modifier.weight(1f),
+                    clearDescription = "清空书名搜索",
+                    onSearch = { focus.clearFocus(); keyboard?.hide() }
                 )
-            )
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("全部", "小说", "漫画").forEach { label ->
-                    val selected = filter == label
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onFilter(label) },
-                        label = { Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
-                        shape = RoundedCornerShape(50),
-                        colors = shelfChipColors(),
-                        border = shelfChipBorder(selected)
-                    )
-                }
-                Spacer(Modifier.weight(1f))
                 Box {
                     FilledTonalIconButton(
                         onClick = { sortMenu = true },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainer,
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
-                        Icon(Icons.Outlined.Sort, "排序：${sort.label}", Modifier.size(20.dp))
+                        Icon(Icons.AutoMirrored.Outlined.Sort, "排序：${sort.label}", Modifier.size(20.dp))
                     }
                     DropdownMenu(sortMenu, { sortMenu = false }) { LibrarySort.entries.forEach { choice ->
                         DropdownMenuItem(text = { Text(choice.label) }, trailingIcon = { if (sort == choice) Icon(Icons.Outlined.Check, null) },
-                            onClick = { onSort(choice); sortMenu = false })
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSort(choice)
+                                sortMenu = false
+                            })
                     } }
                 }
             }
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(null to "全部状态", false to "未读完", true to "已读完").forEach { (value, label) ->
-                    val selected = completion == value
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onCompletion(value) },
-                        label = { Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
-                        shape = RoundedCornerShape(50),
-                        colors = shelfChipColors(),
-                        border = shelfChipBorder(selected),
-                        modifier = Modifier.semantics { contentDescription = "阅读状态：$label" }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainer) {
+                    Row(Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        listOf("全部", "小说", "漫画").forEach { label ->
+                            val selected = filter == label
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .selectable(selected = selected, role = Role.Tab) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onFilter(label)
+                                    }
+                            ) {
+                                Box(Modifier.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                ) {
+                    Text(
+                        if (term.isEmpty()) "${shown.size} 本书" else "找到 ${shown.size} 本书",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
                 }
             }
-            Text(
-                if (term.isEmpty()) "${shown.size} 本书" else "找到 ${shown.size} 本书",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf(null to "全部状态", false to "未读完", true to "已读完").forEach { (value, label) ->
+                    val selected = completion == value
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(
+                            1.dp,
+                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier
+                            .height(30.dp)
+                            .clip(RoundedCornerShape(50))
+                            .selectable(selected = selected, role = Role.Tab) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onCompletion(value)
+                            }
+                            .semantics { contentDescription = "阅读状态：$label" }
+                    ) {
+                        Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (shown.isEmpty()) {
@@ -140,12 +188,23 @@ internal fun Bookshelf(
                 } else EmptyState("这个分类还没有书籍。", "可以切换分类，或导入新的书籍。", Icons.Outlined.AutoStories)
             } else {
                 LazyVerticalGrid(state = state, columns = GridCells.Fixed(columns.coerceIn(1, 6)), modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 88.dp),
-                    horizontalArrangement = Arrangement.spacedBy(if (columns >= 5) 10.dp else 14.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (columns >= 5) 10.dp else 14.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     val recent = shown.filterNot { it.book.completed }.maxByOrNull { it.book.lastOpenedAt }?.takeIf { it.book.lastOpenedAt > 0 && term.isEmpty() }
                     if (recent != null) item(key = "continue-reading", span = { GridItemSpan(maxLineSpan) }) { ResumeBookCard(recent, { open(recent.book) }) }
                     items(shown, key = { it.book.id }) { row ->
-                        Column(Modifier.combinedClickable(onClick = { open(row.book) }, onLongClick = { manage(row.book) })) {
+                        Column(
+                            Modifier
+                                .animateItem()
+                                .clip(RoundedCornerShape(10.dp))
+                                .combinedClickable(
+                                    onClick = { open(row.book) },
+                                    onLongClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        manage(row.book)
+                                    }
+                                )
+                        ) {
                             Box(Modifier.fillMaxWidth()) {
                                 BookCover(row.book, Modifier.fillMaxWidth())
                                 if (row.book.completed) {
@@ -211,6 +270,69 @@ internal fun Bookshelf(
 }
 
 @Composable
+internal fun CompactSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    fieldDescription: String = placeholder,
+    clearDescription: String = "清空搜索",
+    onSearch: () -> Unit = {},
+    trailingAction: (@Composable RowScope.() -> Unit)? = null,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Surface(
+        modifier = modifier.height(44.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = BorderStroke(
+            1.dp,
+            if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f)
+        )
+    ) {
+        Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Outlined.Search,
+                null,
+                Modifier.size(18.dp),
+                tint = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) {
+                    Text(
+                        placeholder,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focused = it.isFocused }
+                        .semantics { contentDescription = fieldDescription }
+                )
+            }
+            if (value.isNotEmpty()) {
+                IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Outlined.Close, clearDescription, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            trailingAction?.invoke(this)
+        }
+    }
+}
+
+@Composable
 internal fun shelfChipColors() = FilterChipDefaults.filterChipColors(
     containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -234,28 +356,42 @@ internal fun ResumeBookCard(row: LibraryBook, open: () -> Unit, subtitle: String
     Surface(
         onClick = open,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.primaryContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
-        shadowElevation = 1.dp
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+        shadowElevation = 2.dp
     ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            BookCover(row.book, Modifier.width(48.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(row.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (row.book.completed) "再次阅读" else "继续阅读", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f))
-                    Text(progressLabel(row), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f))
+        Row(
+            Modifier
+                .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.secondaryContainer)))
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            BookCover(row.book, Modifier.width(52.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
+                        Text(
+                            if (row.book.completed) "再次阅读" else "继续阅读",
+                            Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(progressLabel(row), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f))
                 }
+                Text(row.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 LinearProgressIndicator(
                     progress = { (row.position?.progress ?: 0f).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(50)),
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.primary.copy(alpha = .15f)
                 )
-                subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)) }
+                subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)) }
             }
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, shadowElevation = 2.dp) {
                 Icon(Icons.Outlined.PlayArrow, null, Modifier.padding(9.dp).size(20.dp), tint = MaterialTheme.colorScheme.onPrimary)
             }
         }

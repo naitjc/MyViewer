@@ -37,10 +37,10 @@ private val ReadingPalettes = listOf(
 )
 
 @Composable
-fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit, readingMode: String? = null, onMode: (String) -> Unit = {}) {
+fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit, readingMode: String? = null, onMode: (String) -> Unit = {}, showPreview: Boolean = true) {
     val palette = ReadingPalettes.firstOrNull { it.id == settings.background } ?: ReadingPalettes.first()
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Surface(
+        if (showPreview) Surface(
             shape = RoundedCornerShape(16.dp),
             color = palette.paper,
             border = BorderStroke(1.dp, palette.ink.copy(alpha = .12f)),

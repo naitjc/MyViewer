@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.Image
@@ -12,9 +13,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
@@ -27,10 +27,12 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -95,6 +97,8 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
     var query by rememberSaveable { mutableStateOf("") }
     var languageMenu by remember { mutableStateOf(false) }
     var removingSource by remember { mutableStateOf<SourceEntry?>(null) }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val installed = state.installed.associateBy { it.id }
     val available = (state.installed.map { it.entry } + state.catalog).groupBy { it.id }
         .map { (_, versions) -> versions.maxBy { it.version } }
@@ -104,7 +108,7 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
     val otherLanguages = languages.filterNot { it in commonLanguages }
     LaunchedEffect(state.busy) { if (state.catalog.isEmpty() && state.busy == null && state.error == null) vm.loadCatalog() }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "发现",
                 Modifier.weight(1f).clearAndSetSemantics { contentDescription = "发现"; heading() },
@@ -116,21 +120,12 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
             IconButton(onClick = repository) { Icon(Icons.Outlined.Settings, "管理源仓库") }
         }
         catalogHeader()
-        OutlinedTextField(
-            query,
-            { query = it },
-            placeholder = { Text("搜索漫画源", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)) },
-            shape = RoundedCornerShape(16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f),
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-            ),
-            singleLine = true,
+        CompactSearchField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = "搜索漫画源",
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-            trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "清空搜索") } }
+            onSearch = { focus.clearFocus(); keyboard?.hide() }
         )
         Row(
             Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 4.dp),
@@ -180,6 +175,8 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
             (state.language.isEmpty() || entry.languages.any { sourceLanguageGroup(it) == state.language }) &&
                 (query.isBlank() || "${entry.name} ${entry.id}".contains(query, true))
         }.sortedWith(compareByDescending<SourceEntry> { it.id in installed }.thenBy { it.name })
+        val installedEntries = entries.filter { it.id in installed }
+        val catalogEntries = entries.filterNot { it.id in installed }
         if (entries.isEmpty() && state.busy == null) {
             if (available.isEmpty()) EmptyState("还没有可用的漫画源", "加载仓库后选择漫画源进行安装。", Icons.Outlined.Public) {
                 Button(onClick = { vm.loadCatalog(true) }) { Text("重新加载") }
@@ -187,63 +184,32 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
                 TextButton(onClick = { query = ""; vm.language("") }) { Text("清除筛选") }
             }
         } else LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(entries, key = { it.id }) { entry ->
-                val local = installed[entry.id]
-                val monogram = entry.name.trim().take(1).uppercase()
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
-                    shadowElevation = 0.5.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().clickable(enabled = local != null && state.busy == null) { vm.choose(local!!.entry) }.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            modifier = Modifier.size(44.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (local != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                if (monogram.isNotBlank()) Text(
-                                    monogram,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                ) else Icon(
-                                    Icons.Outlined.Public,
-                                    null,
-                                    Modifier.size(22.dp),
-                                    tint = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(entry.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                "${entry.languages.joinToString(" / ")} · v${entry.version}${if (local != null) " · 已安装" else ""}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (local == null) FilledTonalButton(
-                            onClick = { vm.install(entry) },
-                            enabled = state.busy == null,
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        ) { Text("安装") }
-                        else if (local.entry.version < entry.version) TextButton(onClick = { vm.install(entry) }, enabled = state.busy == null) { Text("更新") }
-                        else TextButton(onClick = { vm.choose(local.entry) }, enabled = state.busy == null, modifier = Modifier.semantics { contentDescription = "浏览 ${entry.name}" }) { Text("浏览", fontWeight = FontWeight.SemiBold) }
-                        if (local != null) IconButton(onClick = { removingSource = local.entry }, enabled = state.busy == null) {
-                            Icon(Icons.Outlined.DeleteOutline, "卸载 ${entry.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
+            if (installedEntries.isNotEmpty()) {
+                item(key = "header-installed") { SourceSectionHeader("已安装 · ${installedEntries.size}") }
+                items(installedEntries, key = { it.id }) { entry ->
+                    SourceEntryCard(
+                        entry = entry,
+                        local = installed[entry.id],
+                        busy = state.busy != null,
+                        onChoose = { vm.choose(it) },
+                        onInstall = { vm.install(it) },
+                        onRemove = { removingSource = it }
+                    )
+                }
+            }
+            if (catalogEntries.isNotEmpty()) {
+                if (installedEntries.isNotEmpty()) {
+                    item(key = "header-catalog") { SourceSectionHeader("发现更多 · ${catalogEntries.size}", Modifier.padding(top = 6.dp)) }
+                }
+                items(catalogEntries, key = { it.id }) { entry ->
+                    SourceEntryCard(
+                        entry = entry,
+                        local = null,
+                        busy = state.busy != null,
+                        onChoose = { vm.choose(it) },
+                        onInstall = { vm.install(it) },
+                        onRemove = { removingSource = it }
+                    )
                 }
             }
         }
@@ -256,25 +222,103 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
 }
 
 @Composable
+private fun SourceSectionHeader(title: String, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+        Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+        HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+    }
+}
+
+@Composable
+private fun SourceEntryCard(
+    entry: SourceEntry,
+    local: InstalledSource?,
+    busy: Boolean,
+    onChoose: (SourceEntry) -> Unit,
+    onInstall: (SourceEntry) -> Unit,
+    onRemove: (SourceEntry) -> Unit,
+) {
+    val monogram = entry.name.trim().take(1).uppercase()
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = if (local != null) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = BorderStroke(
+            1.dp,
+            if (local != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+        ),
+        shadowElevation = if (local != null) 0.dp else 0.5.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.fillMaxWidth().clickable(enabled = local != null && !busy) { onChoose(local!!.entry) }.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = if (local != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (monogram.isNotBlank()) Text(
+                        monogram,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    ) else Icon(
+                        Icons.Outlined.Public,
+                        null,
+                        Modifier.size(22.dp),
+                        tint = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(entry.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${entry.languages.joinToString(" / ")} · v${entry.version}${if (local != null) " · 已安装" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (local != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (local == null) FilledTonalButton(
+                onClick = { onInstall(entry) },
+                enabled = !busy,
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            ) { Text("安装") }
+            else if (local.entry.version < entry.version) TextButton(onClick = { onInstall(entry) }, enabled = !busy) { Text("更新") }
+            else TextButton(onClick = { onChoose(local.entry) }, enabled = !busy, modifier = Modifier.semantics { contentDescription = "浏览 ${entry.name}" }) { Text("浏览", fontWeight = FontWeight.SemiBold) }
+            if (local != null) IconButton(onClick = { onRemove(local.entry) }, enabled = !busy) {
+                Icon(Icons.Outlined.DeleteOutline, "卸载 ${entry.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
 private fun SourceSearch(vm: SourceViewModel, state: SourceBrowserState) {
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            state.query,
-            vm::query,
-            placeholder = { Text("搜索 ${state.source!!.name} 的漫画") },
-            singleLine = true,
-            shape = RoundedCornerShape(16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f),
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-            ),
+        CompactSearchField(
+            value = state.query,
+            onValueChange = vm::query,
+            placeholder = "搜索 ${state.source!!.name} 的漫画",
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { vm.search() }),
-            trailingIcon = {
-                IconButton(onClick = { vm.search() }, enabled = state.busy == null) { Icon(Icons.Outlined.Search, "搜索漫画") }
+            onSearch = { focus.clearFocus(); keyboard?.hide(); vm.search() },
+            trailingAction = {
+                IconButton(
+                    onClick = { focus.clearFocus(); keyboard?.hide(); vm.search() },
+                    enabled = state.busy == null,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Outlined.Search, "搜索漫画", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                }
             }
         )
         if (state.results.isEmpty() && state.busy == null) {
@@ -317,6 +361,8 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
     val exportState by downloads.state.collectAsStateWithLifecycle()
     val chooseFolder = rememberFolderDownloadPicker(title.book.id, downloads) { chapter, folder -> downloads.comic(title, chapter, folder) }
     val chapters = title.manga.chapters.orEmpty()
+    var ascending by rememberSaveable(title.book.id) { mutableStateOf(false) }
+    val displayedChapters = if (ascending) chapters.asReversed() else chapters
     val selected = chapters.firstOrNull { it.key == last?.chapterKey } ?: chapters.lastOrNull()
     val progress = positions.associateBy(ChapterPosition::chapterKey)
     var deleteChapter by remember { mutableStateOf<SourceChapter?>(null) }
@@ -337,26 +383,60 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                         Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainer) {
                             Text(title.sourceId, Modifier.padding(horizontal = 8.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                         }
-                        FilledTonalButton(onClick = vm::addToShelf, enabled = !book.onShelf && state.busy == null, shape = RoundedCornerShape(50)) {
-                            Text(if (book.onShelf) "已加入书架" else "加入书架")
-                        }
                         if (book.completed) Text("已读完", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FilledTonalButton(
+                    onClick = vm::addToShelf,
+                    enabled = !book.onShelf && state.busy == null,
+                    shape = RoundedCornerShape(50),
+                    modifier = if (selected == null) Modifier.fillMaxWidth() else Modifier
+                ) {
+                    Icon(if (book.onShelf) Icons.Outlined.Check else Icons.Outlined.BookmarkAdd, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (book.onShelf) "已加入书架" else "加入书架")
+                }
+                if (selected != null) {
+                    Button(
+                        onClick = { reader.open(title.book, title, selected) },
+                        enabled = state.busy == null,
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Outlined.PlayArrow, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (last?.chapterKey.isNullOrBlank()) "开始阅读" else "继续阅读")
                     }
                 }
             }
         }
         title.manga.description?.takeIf { it.isNotBlank() }?.let { description ->
             item {
+                var expanded by rememberSaveable(title.book.id) { mutableStateOf(false) }
+                val long = description.length > 90
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-                    Text(description, Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("章节 · ${chapters.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                if (selected != null) Button(onClick = { reader.open(title.book, title, selected) }, enabled = state.busy == null, shape = RoundedCornerShape(50)) {
-                    Text(if (last?.chapterKey.isNullOrBlank()) "开始阅读" else "继续阅读")
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            description,
+                            maxLines = if (!long || expanded) Int.MAX_VALUE else 3,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (long) {
+                            Text(
+                                if (expanded) "收起" else "展开简介",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { expanded = !expanded }.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -372,8 +452,23 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                 }
             }
         }
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("章节 · ${chapters.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                if (chapters.size > 1) {
+                    TextButton(
+                        onClick = { ascending = !ascending },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Outlined.SwapVert, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (ascending) "正序" else "倒序", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
         if (chapters.isEmpty()) item { TextButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Text("刷新章节列表") } }
-        items(chapters, key = { it.key }) { chapter ->
+        items(displayedChapters, key = { it.key }) { chapter ->
             val saved = progress[chapter.key]
             val completed = saved?.completed == true
             val downloaded = chapter.key in state.downloaded
@@ -381,7 +476,7 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().animateItem()
             ) {
                 Row(
                     Modifier.fillMaxWidth().clickable(enabled = !chapter.locked && state.busy == null) { reader.open(title.book, title, chapter) }.padding(horizontal = 14.dp, vertical = 10.dp),
