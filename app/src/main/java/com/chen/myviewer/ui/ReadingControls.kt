@@ -115,6 +115,37 @@ fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit, 
             }
         }
         BrightnessSettings(settings, update)
+        ReaderDisplaySwitches(settings, update)
+    }
+}
+
+@Composable
+internal fun ReaderDisplaySwitches(settings: ReaderSettings, update: (ReaderSettings) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("沉浸式全屏", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text("阅读时隐藏系统状态栏与导航栏", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = settings.immersiveMode,
+                onCheckedChange = { update(settings.copy(immersiveMode = it)) },
+                modifier = Modifier.semantics { contentDescription = "沉浸式全屏" }
+            )
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("极简页脚状态栏", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text("在底部显示章节、进度、时间与电量", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = settings.showFooterBar,
+                onCheckedChange = { update(settings.copy(showFooterBar = it)) },
+                modifier = Modifier.semantics { contentDescription = "极简页脚状态栏" }
+            )
+        }
     }
 }
 

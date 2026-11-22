@@ -12,7 +12,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,7 +48,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SourceScreen(vm: SourceViewModel, reader: MainViewModel, catalogHeader: @Composable () -> Unit = {}) {
+fun SourceScreen(
+    vm: SourceViewModel,
+    reader: MainViewModel,
+    catalogHeader: @Composable () -> Unit = {},
+    catalogState: LazyListState = rememberLazyListState(),
+    searchState: LazyListState = rememberLazyListState(),
+    detailState: LazyListState = rememberLazyListState(),
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val downloads: FolderDownloadViewModel = viewModel()
     var repositoryDialog by remember { mutableStateOf(false) }
@@ -64,27 +73,11 @@ fun SourceScreen(vm: SourceViewModel, reader: MainViewModel, catalogHeader: @Com
             if (state.detail != null) IconButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新章节") }
             IconButton(onClick = { settingsSource = state.detail?.sourceId ?: state.source?.id }) { Icon(Icons.Outlined.Settings, "漫画源设置") }
         }
-        FolderDownloadStatus(downloads)
-        state.busy?.let { message ->
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(message, Modifier.padding(horizontal = 16.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
-        }
-        state.downloadStatus?.let { message -> Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = vm::cancelDownload) { Text("取消下载") }
-        } }
-        state.error?.let { message ->
-            Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth().padding(12.dp), shape = MaterialTheme.shapes.medium) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(message, color = MaterialTheme.colorScheme.onErrorContainer)
-                    TextButton(onClick = vm::dismissError) { Text("关闭提示") }
-                }
-            }
-        }
+        SourceStatusBanners(vm, state, downloads)
         when {
-            state.detail != null -> MangaDetails(vm, reader, state, downloads)
-            state.source != null -> SourceSearch(vm, state)
-            else -> SourceCatalog(vm, state, { repositoryUrl = state.repositoryUrl; repositoryDialog = true }, catalogHeader)
+            state.detail != null -> MangaDetails(vm, reader, state, downloads, detailState)
+            state.source != null -> SourceSearch(vm, state, searchState)
+            else -> SourceCatalog(vm, state, { repositoryUrl = state.repositoryUrl; repositoryDialog = true }, catalogHeader, catalogState)
         }
     }
     if (repositoryDialog) AlertDialog(onDismissRequest = { repositoryDialog = false }, title = { Text("漫画源仓库") }, text = {
@@ -93,7 +86,60 @@ fun SourceScreen(vm: SourceViewModel, reader: MainViewModel, catalogHeader: @Com
 }
 
 @Composable
-private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, repository: () -> Unit, catalogHeader: @Composable () -> Unit) {
+internal fun SavedOnlineMangaScreen(
+    vm: SourceViewModel,
+    reader: MainViewModel,
+    listState: LazyListState = rememberLazyListState(),
+    backLabel: String = "返回书库",
+    onBack: () -> Unit,
+) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    val downloads: FolderDownloadViewModel = viewModel()
+    var settingsSource by remember { mutableStateOf<String?>(null) }
+    settingsSource?.let { sourceId ->
+        SourceSettingsScreen(vm.repository, sourceId) { settingsSource = null }
+        return
+    }
+    BackHandler(onBack = onBack)
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, backLabel) }
+            Text(state.detail?.manga?.title ?: "在线漫画", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+            if (state.detail != null) {
+                IconButton(onClick = vm::refreshDetail, enabled = state.busy == null) { Icon(Icons.Outlined.Refresh, "刷新章节") }
+                IconButton(onClick = { settingsSource = state.detail?.sourceId }) { Icon(Icons.Outlined.Settings, "漫画源设置") }
+            }
+        }
+        SourceStatusBanners(vm, state, downloads)
+        if (state.detail != null) {
+            MangaDetails(vm, reader, state, downloads, listState)
+        }
+    }
+}
+
+@Composable
+private fun SourceStatusBanners(vm: SourceViewModel, state: SourceBrowserState, downloads: FolderDownloadViewModel) {
+    FolderDownloadStatus(downloads)
+    state.busy?.let { message ->
+        LinearProgressIndicator(Modifier.fillMaxWidth())
+        Text(message, Modifier.padding(horizontal = 16.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
+    }
+    state.downloadStatus?.let { message -> Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+        TextButton(onClick = vm::cancelDownload) { Text("取消下载") }
+    } }
+    state.error?.let { message ->
+        Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth().padding(12.dp), shape = MaterialTheme.shapes.medium) {
+            Column(Modifier.padding(12.dp)) {
+                Text(message, color = MaterialTheme.colorScheme.onErrorContainer)
+                TextButton(onClick = vm::dismissError) { Text("关闭提示") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, repository: () -> Unit, catalogHeader: @Composable () -> Unit, listState: LazyListState) {
     var query by rememberSaveable { mutableStateOf("") }
     var languageMenu by remember { mutableStateOf(false) }
     var removingSource by remember { mutableStateOf<SourceEntry?>(null) }
@@ -183,7 +229,7 @@ private fun SourceCatalog(vm: SourceViewModel, state: SourceBrowserState, reposi
             } else EmptyState("没有匹配的漫画源", "可以选择其他语言或调整源名称。", Icons.Outlined.SearchOff) {
                 TextButton(onClick = { query = ""; vm.language("") }) { Text("清除筛选") }
             }
-        } else LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        } else LazyColumn(state = listState, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (installedEntries.isNotEmpty()) {
                 item(key = "header-installed") { SourceSectionHeader("已安装 · ${installedEntries.size}") }
                 items(installedEntries, key = { it.id }) { entry ->
@@ -301,7 +347,7 @@ private fun SourceEntryCard(
 }
 
 @Composable
-private fun SourceSearch(vm: SourceViewModel, state: SourceBrowserState) {
+private fun SourceSearch(vm: SourceViewModel, state: SourceBrowserState, listState: LazyListState) {
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     Column(Modifier.fillMaxSize()) {
@@ -325,7 +371,7 @@ private fun SourceSearch(vm: SourceViewModel, state: SourceBrowserState) {
             EmptyState("暂无搜索结果", "输入漫画名称搜索，或重试当前请求。", Icons.Outlined.Search) {
                 Button(onClick = { vm.search() }) { Text("重试") }
             }
-        } else LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        } else LazyColumn(state = listState, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(state.results, key = { it.key }) { manga ->
                 Surface(
                     onClick = { vm.show(manga) },
@@ -352,7 +398,7 @@ private fun SourceSearch(vm: SourceViewModel, state: SourceBrowserState) {
 }
 
 @Composable
-private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: SourceBrowserState, downloads: FolderDownloadViewModel) {
+private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: SourceBrowserState, downloads: FolderDownloadViewModel, listState: LazyListState) {
     val title = state.detail!!
     val library by reader.library.collectAsStateWithLifecycle()
     val book = library.firstOrNull { it.book.id == title.book.id }?.book ?: title.book
@@ -366,7 +412,7 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
     val selected = chapters.firstOrNull { it.key == last?.chapterKey } ?: chapters.lastOrNull()
     val progress = positions.associateBy(ChapterPosition::chapterKey)
     var deleteChapter by remember { mutableStateOf<SourceChapter?>(null) }
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Surface(
                 shape = RoundedCornerShape(18.dp),
@@ -449,6 +495,36 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                         Text("下载整本到文件夹")
                     }
                     Text("整本合并为一个 ZIP，含 ${chapters.count { !it.locked }} 个可读章节。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val readingOrder = chapters.asReversed()
+                    val unreadToDownload = readingOrder.filter { !it.locked && it.key !in state.downloaded && progress[it.key]?.completed != true }
+                    val nextTen = run {
+                        val startIndex = selected?.let { s -> readingOrder.indexOfFirst { it.key == s.key } }?.takeIf { it >= 0 } ?: 0
+                        readingOrder.drop(startIndex).filter { !it.locked && it.key !in state.downloaded }.take(10)
+                    }
+                    if (unreadToDownload.isNotEmpty() || nextTen.isNotEmpty()) {
+                        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (unreadToDownload.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = { vm.downloadChapters(unreadToDownload) },
+                                    shape = RoundedCornerShape(50),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("下载全部未读 (${unreadToDownload.size})", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                            if (nextTen.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = { vm.downloadChapters(nextTen) },
+                                    shape = RoundedCornerShape(50),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("下载后续 ${nextTen.size} 话", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -494,8 +570,12 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                         if (status.isNotBlank()) Text(status, color = if (completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                     IconButton(onClick = { chooseFolder(chapter.key) }, enabled = !chapter.locked && !exportState.running) { Icon(Icons.Outlined.FolderOpen, "保存 ${chapter.label} 到文件夹") }
-                    if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = state.downloadStatus == null) { Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载") }
-                    else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked && state.downloadStatus == null) { Icon(Icons.Outlined.Download, "下载 ${chapter.label}") }
+                    val isActiveDownload = chapter.key == state.activeDownloadKey
+                    val isQueuedDownload = chapter.key in state.downloadQueue
+                    if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = !isActiveDownload) { Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载") }
+                    else if (isActiveDownload) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
+                    else if (isQueuedDownload) Icon(Icons.Outlined.HourglassEmpty, "排队下载中", Modifier.padding(12.dp).size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                    else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked) { Icon(Icons.Outlined.Download, "下载 ${chapter.label}") }
                 }
             }
         }

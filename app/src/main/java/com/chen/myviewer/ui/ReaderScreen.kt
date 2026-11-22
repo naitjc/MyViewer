@@ -2,7 +2,15 @@
 package com.chen.myviewer.ui
 
 import android.app.Activity
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.view.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -101,13 +109,31 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
     DisposableEffect(window) {
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val originalBrightness = window?.attributes?.screenBrightness ?: -1f
-        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); window?.let { it.attributes = it.attributes.apply { screenBrightness = originalBrightness } } }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window?.let {
+                it.attributes = it.attributes.apply { screenBrightness = originalBrightness }
+                WindowCompat.getInsetsController(it, it.decorView).show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
     }
     LaunchedEffect(window, settings.brightness) {
         window?.let { if (it.attributes.screenBrightness != settings.brightness) it.attributes = it.attributes.apply { screenBrightness = settings.brightness } }
     }
+    LaunchedEffect(window, settings.immersiveMode, menu, sheet) {
+        window?.let { w ->
+            val controller = WindowCompat.getInsetsController(w, w.decorView)
+            if (settings.immersiveMode && !menu && sheet == null) {
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
 
-    Box(Modifier.fillMaxSize().then(if (sheet != null) Modifier.clearAndSetSemantics { } else Modifier).background(if (session.book.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface).windowInsetsPadding(WindowInsets.safeDrawing).pointerInput(automatic) {
+    val rootInsetsModifier = if (settings.immersiveMode) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
+    Box(Modifier.fillMaxSize().then(if (sheet != null) Modifier.clearAndSetSemantics { } else Modifier).background(if (session.book.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface).then(rootInsetsModifier).pointerInput(automatic) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             if (automatic.running) pauseAutomatic()
@@ -149,7 +175,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
             MaterialTheme(colorScheme = menuColorScheme) {
-                Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f), contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = 3.dp) {
+                Surface(Modifier.fillMaxWidth().then(if (settings.immersiveMode) Modifier.statusBarsPadding() else Modifier), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f), contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = 3.dp) {
                     Column {
                         Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = close) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回书架") }
@@ -173,7 +199,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
         ) {
             MaterialTheme(colorScheme = menuColorScheme) {
                 Surface(
-                    Modifier.fillMaxWidth().onSizeChanged { menuHeight = it.height },
+                    Modifier.fillMaxWidth().then(if (settings.immersiveMode) Modifier.navigationBarsPadding() else Modifier).onSizeChanged { menuHeight = it.height },
                     shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
                     contentColor = MaterialTheme.colorScheme.onSurface,
@@ -239,6 +265,15 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                     }
                 }
             }
+        }
+        if (settings.showFooterBar && !menu && !automatic.running) {
+            ReaderFooterBar(
+                session = session,
+                settings = settings,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .then(if (settings.immersiveMode) Modifier.navigationBarsPadding() else Modifier)
+            )
         }
         if (automatic.running) {
             FilledTonalButton(onClick = pauseAutomatic, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp)) {
@@ -314,6 +349,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                                 ReaderChoice("阅读方式", listOf("PAGE" to "翻页", "SCROLL" to "连续"), session.preferences.mode, vm::mode)
                                 if (session.preferences.mode == "PAGE") ReaderChoice("阅读方向", listOf("LTR" to "从左到右", "RTL" to "从右到左"), session.preferences.direction, vm::direction)
                                 BrightnessSettings(settings, vm::updateSettings)
+                                ReaderDisplaySwitches(settings, vm::updateSettings)
                                 HorizontalDivider()
                                 TextButton(onClick = { sheet = "jump" }, modifier = Modifier.fillMaxWidth()) { Text("当前页 · ${session.position.imageIndex + 1} / ${session.comic!!.imageNames.size}") }
                                 TextButton(onClick = { sheet = "automatic" }, modifier = Modifier.fillMaxWidth()) { Text("自动阅读") }
@@ -612,5 +648,71 @@ private fun ReaderProgress(session: ReaderSession, undoLabel: String? = null, on
             Text(if (session.text != null) "${(value * 100).toInt()}%" else "${(value * (session.comic!!.imageNames.size - 1)).toInt() + 1} / ${session.comic.imageNames.size} 页", style = MaterialTheme.typography.bodySmall)
         }
         ReaderSlider(value, { value = it }, Modifier.fillMaxWidth().semantics { contentDescription = "阅读进度滑杆" }, valueLabel = "${(value * 100).toInt()}%", onFinished = { seek(value) })
+    }
+}
+
+@Composable
+private fun ReaderFooterBar(session: ReaderSession, settings: ReaderSettings, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    val clockText by produceState(LocalTime.now().format(timeFormatter)) {
+        while (isActive) {
+            delay(30_000)
+            value = LocalTime.now().format(timeFormatter)
+        }
+    }
+    val batteryPct by produceState<Int?>(null, context) {
+        fun readBattery(): Int? {
+            val intent = runCatching { context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) }.getOrNull() ?: return null
+            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            return if (level >= 0 && scale > 0) (level * 100 / scale).coerceIn(0, 100) else null
+        }
+        value = readBattery()
+        while (isActive) {
+            delay(60_000)
+            value = readBattery()
+        }
+    }
+    val ink = if (session.comic != null) {
+        Color.White.copy(alpha = 0.65f)
+    } else when (settings.background) {
+        "NIGHT" -> Color(0xFFCDD1C9).copy(alpha = 0.58f)
+        "GREEN" -> Color(0xFF253725).copy(alpha = 0.58f)
+        "WHITE" -> Color(0xFF232825).copy(alpha = 0.52f)
+        else -> Color(0xFF312C25).copy(alpha = 0.55f)
+    }
+    val leftLabel = session.chapter?.label
+        ?: session.novelChapter?.name
+        ?: session.text?.chapterAt(session.position.textOffset)
+        ?: session.book.title
+    val progressText = if (session.text != null) {
+        "${(session.position.progress * 100).toInt()}%"
+    } else {
+        "${session.position.imageIndex + 1}/${session.comic?.imageNames?.size ?: 1}"
+    }
+    val rightParts = listOfNotNull(progressText, clockText, batteryPct?.let { "$it%" }).joinToString(" · ")
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 6.dp)
+            .semantics { contentDescription = "阅读页脚状态栏" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            leftLabel,
+            Modifier.weight(1f),
+            style = MaterialTheme.typography.labelSmall,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            rightParts,
+            style = MaterialTheme.typography.labelSmall,
+            color = ink,
+            maxLines = 1
+        )
     }
 }

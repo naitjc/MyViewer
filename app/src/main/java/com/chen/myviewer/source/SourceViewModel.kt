@@ -29,6 +29,9 @@ data class SourceBrowserState(
     val error: String? = null,
     val downloaded: Set<String> = emptySet(),
     val downloadStatus: String? = null,
+    val activeDownloadKey: String? = null,
+    val downloadQueue: List<String> = emptyList(),
+    val searchSession: Long = 0L,
 )
 
 class SourceViewModel(application: Application) : AndroidViewModel(application) {
@@ -38,6 +41,8 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
     private var job: Job? = null
     private var downloadJob: Job? = null
     private var downloadingSource: String? = null
+    private var activeDownload: Pair<OnlineTitle, SourceChapter>? = null
+    private val pendingDownloads = ArrayDeque<Pair<OnlineTitle, SourceChapter>>()
     private var generation = 0L
     init { viewModelScope.launch {
         val installed = withContext(Dispatchers.IO) { repository.installed() }
@@ -55,7 +60,12 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
         state.update { it.copy(installed = installed) }
     }
     fun uninstall(entry: SourceEntry) = work("正在卸载 ${entry.name}…") {
-        if (downloadingSource == entry.id) downloadJob?.cancelAndJoin()
+        pendingDownloads.removeAll { it.first.sourceId == entry.id }
+        state.update { it.copy(downloadQueue = pendingDownloads.map { pair -> pair.second.key }) }
+        if (downloadingSource == entry.id) {
+            pendingDownloads.clear()
+            downloadJob?.cancelAndJoin()
+        }
         repository.uninstall(entry.id)
         val installed = withContext(Dispatchers.IO) { repository.installed() }
         state.update { it.copy(installed = installed) }
@@ -71,6 +81,7 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
         val current = state.value
         val source = current.source ?: return
         val page = if (more) current.page + 1 else 1
+        if (!more) state.update { it.copy(searchSession = it.searchSession + 1) }
         work("正在搜索…") {
             val results = repository.search(source.id, current.query, page)
             state.update { it.copy(results = (if (more) it.results + results.entries else results.entries).distinctBy(SourceManga::key),
@@ -85,7 +96,12 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
             showTitle(title)
         }
     }
-    fun showSaved(book: Book) = work("正在读取漫画详情…") { showTitle(repository.title(book)) }
+    fun showSaved(book: Book) {
+        if (state.value.detail?.book?.id != book.id) {
+            state.update { it.copy(detail = null, downloaded = emptySet()) }
+        }
+        work("正在读取漫画详情…") { showTitle(repository.title(book)) }
+    }
     private suspend fun showTitle(title: OnlineTitle) {
         val downloaded = withContext(Dispatchers.IO) { title.manga.chapters.orEmpty().filter { repository.downloaded(title.book.id, it.key) }.map { it.key }.toSet() }
         state.update { it.copy(detail = title, downloaded = downloaded) }
@@ -101,20 +117,72 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
         val title = state.value.detail ?: return
         work("正在加入书架…") { showTitle(repository.saveTitle(title.sourceId, title.manga)) }
     }
-    fun download(chapter: SourceChapter) {
+    fun download(chapter: SourceChapter) = downloadChapters(listOf(chapter))
+
+    fun downloadChapters(chapters: List<SourceChapter>) {
         val title = state.value.detail ?: return
+        val existingKeys = buildSet {
+            activeDownload?.let { if (it.first.book.id == title.book.id) add(it.second.key) }
+            pendingDownloads.forEach { if (it.first.book.id == title.book.id) add(it.second.key) }
+        }
+        val toAdd = chapters.filter { chapter ->
+            !chapter.locked &&
+                chapter.key !in existingKeys &&
+                !repository.downloaded(title.book.id, chapter.key)
+        }
+        if (toAdd.isEmpty()) return
+        toAdd.forEach { pendingDownloads.addLast(title to it) }
+        state.update { it.copy(downloadQueue = pendingDownloads.map { pair -> pair.second.key }, error = null) }
+        startDownloadWorker()
+    }
+
+    private fun startDownloadWorker() {
         if (downloadJob?.isActive == true) return
-        downloadingSource = title.sourceId
         downloadJob = viewModelScope.launch {
-            state.update { it.copy(downloadStatus = "正在下载 ${chapter.label}…", error = null) }
             try {
-                repository.download(title, chapter) { done, total -> state.update { it.copy(downloadStatus = "正在下载 ${chapter.label} · $done / $total") } }
-                if (state.value.detail?.book?.id == title.book.id) state.update { it.copy(downloaded = it.downloaded + chapter.key) }
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { state.update { it.copy(error = error.message ?: "下载失败，请重试") } }
-            finally { downloadingSource = null; state.update { it.copy(downloadStatus = null) } }
+                while (pendingDownloads.isNotEmpty()) {
+                    val item = pendingDownloads.removeFirst()
+                    val (title, chapter) = item
+                    activeDownload = item
+                    downloadingSource = title.sourceId
+                    val remaining = pendingDownloads.size
+                    val queueSuffix = if (remaining > 0) "（队列剩余 $remaining 话）" else ""
+                    state.update {
+                        it.copy(
+                            activeDownloadKey = chapter.key,
+                            downloadQueue = pendingDownloads.map { pair -> pair.second.key },
+                            downloadStatus = "正在下载 ${chapter.label}…$queueSuffix"
+                        )
+                    }
+                    try {
+                        repository.download(title, chapter) { done, total ->
+                            val left = pendingDownloads.size
+                            val suffix = if (left > 0) "（队列剩余 $left 话）" else ""
+                            state.update { it.copy(downloadStatus = "正在下载 ${chapter.label} · $done / $total$suffix") }
+                        }
+                        if (state.value.detail?.book?.id == title.book.id) {
+                            state.update { it.copy(downloaded = it.downloaded + chapter.key) }
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        state.update { it.copy(error = "${chapter.label} 下载失败：${error.message ?: "请重试"}") }
+                    }
+                }
+            } finally {
+                activeDownload = null
+                downloadingSource = null
+                state.update {
+                    it.copy(
+                        activeDownloadKey = null,
+                        downloadQueue = emptyList(),
+                        downloadStatus = null
+                    )
+                }
+            }
         }
     }
+
     fun deleteDownload(chapter: SourceChapter) {
         val title = state.value.detail ?: return
         work("正在删除下载…") {
@@ -122,7 +190,11 @@ class SourceViewModel(application: Application) : AndroidViewModel(application) 
             state.update { it.copy(downloaded = it.downloaded - chapter.key) }
         }
     }
-    fun cancelDownload() { downloadJob?.cancel() }
+    fun cancelDownload() {
+        pendingDownloads.clear()
+        downloadJob?.cancel()
+        state.update { it.copy(activeDownloadKey = null, downloadQueue = emptyList(), downloadStatus = null) }
+    }
     fun back(): Boolean {
         val current = state.value
         if (current.detail == null && current.source == null) return false

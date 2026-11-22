@@ -154,6 +154,71 @@ class OnlineReadingFlowTest {
         waitForUi { sources.state.value.installed.none { it.id == guya.id } }
         compose.onNodeWithContentDescription("浏览 Guya").assertDoesNotExist()
     }
+    @Test fun discoverPreservesScrollPositionWhenReturningFromMangaDetail() {
+        val sources = ViewModelProvider(compose.activity)[SourceViewModel::class.java]
+        val guya = SourceEntry("en.guya", "Guya", 2, listOf("en"), "https://example.test/guya.aix", "https://guya.cubari.moe", 0)
+        val items = (1..30).map { index ->
+            SourceManga("manga-$index", "漫画 $index", null, listOf("作者 $index"), "简介 $index", null, emptyList(), 1, null, byteArrayOf(0))
+        }
+        compose.runOnIdle { sources.state.value = SourceBrowserState(source = guya, results = items) }
+        compose.onNodeWithText("发现").performClick()
+        waitForUi { compose.onAllNodesWithText("漫画 1").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(24)
+        waitForUi { compose.onAllNodesWithText("漫画 25").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("漫画 25").assertIsDisplayed()
+        compose.onNodeWithText("漫画 1").assertDoesNotExist()
+
+        val chapters = listOf(SourceChapter("one", "第一章", 1f, false, byteArrayOf(0)))
+        val detailManga = items[24].copy(chapters = chapters)
+        val title = runBlocking { sources.repository.saveTitle(guya.id, detailManga, onShelf = false) }
+        compose.runOnIdle { sources.state.value = sources.state.value.copy(detail = title) }
+        waitForUi { compose.onAllNodesWithText("章节 · 1").fetchSemanticsNodes().isNotEmpty() }
+
+        compose.onNodeWithContentDescription("返回漫画源").performClick()
+        waitForUi { compose.onAllNodesWithText("章节 · 1").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithText("漫画 25").assertExists()
+        compose.onNodeWithText("漫画 1").assertDoesNotExist()
+
+        compose.runOnIdle { sources.state.value = sources.state.value.copy(detail = title) }
+        waitForUi { compose.onAllNodesWithText("章节 · 1").fetchSemanticsNodes().isNotEmpty() }
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        waitForUi { compose.onAllNodesWithText("章节 · 1").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithText("漫画 25").assertExists()
+        compose.onNodeWithText("漫画 1").assertDoesNotExist()
+    }
+    @Test fun shelfOnlineMangaBackReturnsToShelfWithoutSwitchingToDiscover() {
+        val sources = ViewModelProvider(compose.activity)[SourceViewModel::class.java]
+        val app = sources.getApplication<ViewerApplication>()
+        val guya = SourceEntry("en.guya", "Guya", 2, listOf("en"), "https://example.test/guya.aix", "https://guya.cubari.moe", 0)
+        val discoverManga = SourceManga("discover-only", "发现页漫画", null, listOf("作者"), null, null, emptyList(), 1, null, byteArrayOf(0))
+        compose.runOnIdle { sources.state.value = SourceBrowserState(source = guya, results = listOf(discoverManga)) }
+
+        val chapters = listOf(SourceChapter("one", "第一章", 1f, false, byteArrayOf(0)))
+        val shelfManga = SourceManga("shelf-online", "书架在线漫画", null, listOf("测试作者"), "书架在线测试。", null, emptyList(), 1, chapters, byteArrayOf(0))
+        runBlocking { app.sources.saveTitle("test.offline", shelfManga, onShelf = true) }
+
+        compose.onNodeWithText("书库").performClick()
+        waitForUi { compose.onAllNodesWithText("书架在线漫画").fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodesWithText("书架在线漫画").onFirst().performClick()
+        waitForUi { compose.onAllNodesWithText("开始阅读").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("返回书库").assertExists()
+
+        compose.onNodeWithContentDescription("返回书库").performClick()
+        waitForUi { compose.onAllNodesWithText("开始阅读").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithContentDescription("导入书籍").assertExists()
+        compose.onNodeWithText("发现页漫画").assertDoesNotExist()
+
+        compose.onAllNodesWithText("书架在线漫画").onFirst().performClick()
+        waitForUi { compose.onAllNodesWithText("开始阅读").fetchSemanticsNodes().isNotEmpty() }
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        waitForUi { compose.onAllNodesWithText("开始阅读").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithContentDescription("导入书籍").assertExists()
+        compose.onNodeWithText("发现页漫画").assertDoesNotExist()
+
+        compose.onNodeWithText("发现").performClick()
+        waitForUi { compose.onAllNodesWithText("发现页漫画").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("发现页漫画").assertExists()
+    }
     private fun waitForUi(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 20_000
         while (System.currentTimeMillis() < deadline) {

@@ -18,6 +18,12 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import java.util.UUID
 
+data class StorageUsage(
+    val comicCacheBytes: Long = 0L,
+    val onlineDownloadsBytes: Long = 0L,
+    val copiedBooksBytes: Long = 0L,
+)
+
 data class ImportUi(
     val candidates: List<ImportCandidate> = emptyList(),
     val copy: Boolean = false,
@@ -60,6 +66,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val error = MutableStateFlow<String?>(null)
     val failedBook = MutableStateFlow<Book?>(null)
     val notice = MutableStateFlow<String?>(null)
+    val storageUsage = MutableStateFlow(StorageUsage())
+    val refreshingFolders = MutableStateFlow(false)
+    val checkingUpdates = MutableStateFlow(false)
+    val backupBusy = MutableStateFlow(false)
     private var openJob: Job? = null
     private val saves = Channel<ReadingPosition>(Channel.CONFLATED)
     private var sequence = 0L
@@ -267,14 +277,163 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         catch (error: Exception) { notice.value = "阅读状态保存失败，请重试。" }
     }
     fun clearHistory() = viewModelScope.launch { repository.dao.clearHistory() }
+    fun removeFromHistory(book: Book) = viewModelScope.launch {
+        repository.dao.removeFromHistory(book.id)
+        notice.value = "已从历史记录移除"
+    }
+    fun rename(book: Book, newTitle: String) = viewModelScope.launch {
+        val trimmed = newTitle.trim()
+        if (trimmed.isNotEmpty()) {
+            repository.dao.rename(book.id, trimmed)
+            notice.value = "已重命名"
+        }
+    }
+    fun setPinned(book: Book, pinned: Boolean) = viewModelScope.launch {
+        repository.dao.setPinned(book.id, pinned)
+        notice.value = if (pinned) "已置顶" else "已取消置顶"
+    }
+    fun hideBatch(ids: Set<String>) = viewModelScope.launch {
+        if (ids.isEmpty()) return@launch
+        repository.dao.hideBatch(ids.toList())
+        notice.value = "已移出 ${ids.size} 本书"
+    }
+    fun setCompletedBatch(ids: Set<String>, completed: Boolean) = viewModelScope.launch {
+        if (ids.isEmpty()) return@launch
+        repository.dao.setCompletedBatch(ids.toList(), completed)
+        notice.value = if (completed) "已将 ${ids.size} 本书标为已读完" else "已取消 ${ids.size} 本书的已读完标记"
+    }
+    fun clearUnreadChapters(bookId: String) = viewModelScope.launch {
+        repository.dao.setUnreadChapters(bookId, 0)
+    }
     fun removeFolder(uri: String) = viewModelScope.launch { repository.dao.deleteFolder(uri) }
+    fun refreshStorageUsage() = viewModelScope.launch {
+        val usage = withContext(Dispatchers.IO) {
+            StorageUsage(
+                comicCacheBytes = directoryBytes(java.io.File(app.cacheDir, "comic")) +
+                    directoryBytes(java.io.File(app.cacheDir, "online")) +
+                    directoryBytes(java.io.File(app.cacheDir, "online-covers")),
+                onlineDownloadsBytes = directoryBytes(java.io.File(app.filesDir, "downloads")),
+                copiedBooksBytes = directoryBytes(java.io.File(app.filesDir, "books")),
+            )
+        }
+        storageUsage.value = usage
+    }
     fun clearComicCache() = viewModelScope.launch {
         if (reader.value != null) return@launch
         withContext(Dispatchers.IO) {
             java.io.File(app.cacheDir, "comic").deleteRecursively()
             java.io.File(app.cacheDir, "online").deleteRecursively()
+            java.io.File(app.cacheDir, "online-covers").deleteRecursively()
         }
+        refreshStorageUsage()
         notice.value = "漫画缓存已清理，书籍、进度和书签已保留"
+    }
+    fun refreshAllFolders() = viewModelScope.launch {
+        if (refreshingFolders.value) return@launch
+        val saved = folders.value
+        if (saved.isEmpty()) {
+            notice.value = "还没有添加文件夹"
+            return@launch
+        }
+        refreshingFolders.value = true
+        try {
+            var added = 0
+            var failed = 0
+            for (folder in saved) {
+                try {
+                    val candidates = repository.scan(Uri.parse(folder.uri), folder.recursive) {}
+                    if (candidates.isNotEmpty()) {
+                        val result = repository.import(candidates, settings.value.copyOnImport) { _, _ -> }
+                        added += result.added
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    failed++
+                }
+            }
+            notice.value = when {
+                added > 0 && failed == 0 -> "已从文件夹新增 $added 本书"
+                added > 0 -> "新增 $added 本书，$failed 个文件夹扫描失败"
+                failed > 0 -> "$failed 个文件夹扫描失败，请检查授权"
+                else -> "文件夹已是最新"
+            }
+        } finally {
+            refreshingFolders.value = false
+        }
+    }
+    fun checkOnlineMangaUpdates() = viewModelScope.launch {
+        if (checkingUpdates.value) return@launch
+        val targets = library.value.filter { it.book.onShelf && it.book.storage == "ONLINE" }.map { it.book }
+        if (targets.isEmpty()) {
+            notice.value = "书架上没有在线漫画"
+            return@launch
+        }
+        checkingUpdates.value = true
+        try {
+            var updatedBooks = 0
+            var totalNewChapters = 0
+            var failed = 0
+            for (book in targets) {
+                try {
+                    val oldTitle = app.sources.title(book)
+                    val fresh = app.sources.details(oldTitle.sourceId, oldTitle.manga)
+                    app.sources.saveTitle(oldTitle.sourceId, fresh, onShelf = true)
+                    val oldKeys = oldTitle.manga.chapters.orEmpty().map { it.key }.toSet()
+                    val newKeys = fresh.chapters.orEmpty().map { it.key }.toSet()
+                    val newCount = (newKeys - oldKeys).size
+                    if (newCount > 0) {
+                        repository.dao.setUnreadChapters(book.id, book.unreadChapters + newCount)
+                        updatedBooks++
+                        totalNewChapters += newCount
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    failed++
+                }
+            }
+            notice.value = when {
+                updatedBooks > 0 && failed == 0 -> "$updatedBooks 部漫画有更新，共新增 $totalNewChapters 话"
+                updatedBooks > 0 -> "$updatedBooks 部漫画新增 $totalNewChapters 话（$failed 部检查失败）"
+                failed > 0 -> "检查更新完成，有 $failed 部漫画请求失败"
+                else -> "所有在线漫画均已是最新"
+            }
+        } finally {
+            checkingUpdates.value = false
+        }
+    }
+    fun exportBackup(uri: Uri) = viewModelScope.launch {
+        if (backupBusy.value) return@launch
+        backupBusy.value = true
+        try {
+            val summary = BackupManager.exportToUri(app, uri, repository.dao, app.settings)
+            notice.value = "已导出备份：${summary.books} 本书、${summary.bookmarks} 条书签"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            notice.value = e.message ?: "导出备份失败"
+        } finally {
+            backupBusy.value = false
+        }
+    }
+    fun importBackup(uri: Uri) = viewModelScope.launch {
+        if (backupBusy.value) return@launch
+        backupBusy.value = true
+        try {
+            val summary = BackupManager.importFromUri(app, uri, repository.dao, app.settings)
+            notice.value = "已恢复 ${summary.books} 本书、${summary.bookmarks} 条书签与设置"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            notice.value = e.message ?: "恢复备份失败，请确认文件格式正确"
+        } finally {
+            backupBusy.value = false
+        }
+    }
+    private fun directoryBytes(root: java.io.File): Long {
+        if (!root.exists()) return 0L
+        return root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
     }
     fun relink(book: Book, uri: Uri) = viewModelScope.launch {
         runCatching { repository.dao.relink(book.id, uri.toString()); repository.dao.book(book.id)?.let { open(it) } }.onFailure { error.value = it.message }

@@ -44,8 +44,16 @@ internal fun Bookshelf(
     filter: String, onFilter: (String) -> Unit, completion: Boolean?, onCompletion: (Boolean?) -> Unit, query: String, onQuery: (String) -> Unit,
     columns: Int, state: LazyGridState, onTop: () -> Unit,
     open: (Book) -> Unit, manage: (Book) -> Unit, import: () -> Unit,
+    batchMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onToggleSelect: (String) -> Unit = {},
+    onSelectAll: (List<String>) -> Unit = {},
+    onExitBatch: () -> Unit = {},
+    onBatchComplete: (Boolean) -> Unit = {},
+    onBatchRemove: () -> Unit = {},
 ) {
     var sortMenu by remember { mutableStateOf(false) }
+    var confirmBatchRemove by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val haptic = LocalHapticFeedback.current
@@ -55,11 +63,12 @@ internal fun Bookshelf(
             (completion == null || it.book.completed == completion) &&
             (term.isEmpty() || it.book.title.contains(term, ignoreCase = true))
     }.let {
+        val pinnedFirst = compareByDescending<LibraryBook> { row -> row.book.pinned }
         val stable = compareBy<LibraryBook> { row -> row.book.title }.thenBy { row -> row.book.id }
         when (sort) {
-            LibrarySort.TITLE -> it.sortedWith(stable)
-            LibrarySort.IMPORTED -> it.sortedWith(compareByDescending<LibraryBook> { row -> row.book.importedAt }.then(stable))
-            LibrarySort.RECENT -> it.sortedWith(compareByDescending<LibraryBook> { row -> row.book.lastOpenedAt }.thenByDescending { row -> row.book.importedAt }.then(stable))
+            LibrarySort.TITLE -> it.sortedWith(pinnedFirst.then(stable))
+            LibrarySort.IMPORTED -> it.sortedWith(pinnedFirst.thenByDescending { row -> row.book.importedAt }.then(stable))
+            LibrarySort.RECENT -> it.sortedWith(pinnedFirst.thenByDescending { row -> row.book.lastOpenedAt }.thenByDescending { row -> row.book.importedAt }.then(stable))
         }
     }
     val atBottom by remember(state) { derivedStateOf { state.canScrollBackward && !state.canScrollForward } }
@@ -71,6 +80,23 @@ internal fun Bookshelf(
     }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp)) {
+            if (batchMode) {
+                val shownIds = shown.map { it.book.id }
+                val allSelected = shownIds.isNotEmpty() && shownIds.all { it in selectedIds }
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                ) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("已选 ${selectedIds.size} 本", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        TextButton(onClick = { onSelectAll(if (allSelected) emptyList() else shownIds) }) {
+                            Text(if (allSelected) "取消全选" else "全选")
+                        }
+                        TextButton(onClick = onExitBatch) { Text("完成") }
+                    }
+                }
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CompactSearchField(
                     value = query,
@@ -190,35 +216,82 @@ internal fun Bookshelf(
                 LazyVerticalGrid(state = state, columns = GridCells.Fixed(columns.coerceIn(1, 6)), modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (columns >= 5) 10.dp else 14.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    val recent = shown.filterNot { it.book.completed }.maxByOrNull { it.book.lastOpenedAt }?.takeIf { it.book.lastOpenedAt > 0 && term.isEmpty() }
+                    val recent = shown.filterNot { it.book.completed }.maxByOrNull { it.book.lastOpenedAt }?.takeIf { it.book.lastOpenedAt > 0 && term.isEmpty() && !batchMode }
                     if (recent != null) item(key = "continue-reading", span = { GridItemSpan(maxLineSpan) }) { ResumeBookCard(recent, { open(recent.book) }) }
                     items(shown, key = { it.book.id }) { row ->
+                        val isSelected = row.book.id in selectedIds
                         Column(
                             Modifier
                                 .animateItem()
                                 .clip(RoundedCornerShape(10.dp))
                                 .combinedClickable(
-                                    onClick = { open(row.book) },
+                                    onClick = { if (batchMode) onToggleSelect(row.book.id) else open(row.book) },
                                     onLongClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        manage(row.book)
+                                        if (batchMode) onToggleSelect(row.book.id) else manage(row.book)
                                     }
                                 )
                         ) {
                             Box(Modifier.fillMaxWidth()) {
                                 BookCover(row.book, Modifier.fillMaxWidth())
-                                if (row.book.completed) {
+                                if (batchMode) {
                                     Box(
                                         Modifier
+                                            .matchParentSize()
+                                            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.08f))
+                                    )
+                                    Icon(
+                                        if (isSelected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                                        contentDescription = if (isSelected) "已选中 ${row.book.title}" else "未选中 ${row.book.title}",
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
+                                        modifier = Modifier
                                             .align(Alignment.TopEnd)
                                             .padding(if (columns >= 5) 4.dp else 6.dp)
-                                            .size(if (columns >= 5) 16.dp else 20.dp)
-                                            .background(MaterialTheme.colorScheme.primary, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Outlined.Check, null, Modifier.size(if (columns >= 5) 10.dp else 13.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                            .size(if (columns >= 5) 18.dp else 22.dp)
+                                    )
+                                } else {
+                                    if (row.book.pinned) {
+                                        Box(
+                                            Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(if (columns >= 5) 4.dp else 6.dp)
+                                                .size(if (columns >= 5) 16.dp else 20.dp)
+                                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.92f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Outlined.PushPin, "已置顶", Modifier.size(if (columns >= 5) 10.dp else 12.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                        }
                                     }
-                                } else if (row.book.lastOpenedAt > 0 && (row.position?.progress ?: 0f) > 0f) {
+                                    if (row.book.unreadChapters > 0) {
+                                        Surface(
+                                            shape = RoundedCornerShape(50),
+                                            color = MaterialTheme.colorScheme.tertiary,
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(if (columns >= 5) 4.dp else 6.dp)
+                                        ) {
+                                            Text(
+                                                "+${row.book.unreadChapters}",
+                                                color = MaterialTheme.colorScheme.onTertiary,
+                                                fontSize = if (columns >= 5) 9.sp else 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = if (columns >= 5) 5.dp else 6.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    } else if (row.book.completed) {
+                                        Box(
+                                            Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(if (columns >= 5) 4.dp else 6.dp)
+                                                .size(if (columns >= 5) 16.dp else 20.dp)
+                                                .background(MaterialTheme.colorScheme.primary, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Outlined.Check, null, Modifier.size(if (columns >= 5) 10.dp else 13.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                        }
+                                    }
+                                }
+                                if (!batchMode && !row.book.completed && row.book.lastOpenedAt > 0 && (row.position?.progress ?: 0f) > 0f) {
                                     val progress = (row.position?.progress ?: 0f).coerceIn(0f, 1f)
                                     Box(
                                         Modifier
@@ -259,13 +332,60 @@ internal fun Bookshelf(
                         }
                     }
                 }
-                androidx.compose.animation.AnimatedVisibility(visible = atBottom, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+                androidx.compose.animation.AnimatedVisibility(visible = atBottom && !batchMode, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
                     ExtendedFloatingActionButton(onClick = onTop, icon = { Icon(Icons.Outlined.ArrowUpward, null) }, text = { Text("回到顶部") },
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.semantics { contentDescription = "回到书库顶部" }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
             }
         }
+        if (batchMode) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 2.dp,
+                shadowElevation = 4.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = { onBatchComplete(true) },
+                        enabled = selectedIds.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) { Text("标为已读完", maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                    OutlinedButton(
+                        onClick = { onBatchComplete(false) },
+                        enabled = selectedIds.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) { Text("标为未读完", maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                    Button(
+                        onClick = { confirmBatchRemove = true },
+                        enabled = selectedIds.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                    ) { Text("移出书架", maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                }
+            }
+        }
+    }
+    if (confirmBatchRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmBatchRemove = false },
+            title = { Text("批量移出书架？") },
+            text = { Text("将所选的 ${selectedIds.size} 本书移出书架，文件、进度、书签和历史会保留。") },
+            confirmButton = {
+                TextButton(onClick = { confirmBatchRemove = false; onBatchRemove() }) { Text("移出") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmBatchRemove = false }) { Text("取消") }
+            }
+        )
     }
 }
 

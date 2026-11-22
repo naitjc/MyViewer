@@ -40,7 +40,7 @@ class NovelMigrationTest {
             old.execSQL("INSERT INTO chapter_positions (bookId,chapterKey,imageIndex,imageRatio,progress,completed) VALUES ('old','chapter-one',2,0.4,1.0,1)")
             old.version = 4
         }
-        val db = Room.databaseBuilder(context, ViewerDatabase::class.java, name).addMigrations(ViewerDatabase.MIGRATION_4_5).allowMainThreadQueries().build()
+        val db = Room.databaseBuilder(context, ViewerDatabase::class.java, name).addMigrations(ViewerDatabase.MIGRATION_4_5, ViewerDatabase.MIGRATION_5_6).allowMainThreadQueries().build()
         try {
             val dao = db.dao()
             assertTrue(dao.book("old")!!.completed)

@@ -27,7 +27,7 @@ import java.time.format.DateTimeFormatter
 
 @Composable
 internal fun History(books: List<LibraryBook>, open: (Book) -> Unit, clear: () -> Unit, library: () -> Unit,
-    totals: ReadingTotals = ReadingTotals(), bookTimes: Map<String, Long> = emptyMap()) {
+    totals: ReadingTotals = ReadingTotals(), bookTimes: Map<String, Long> = emptyMap(), remove: (Book) -> Unit = {}) {
     var confirm by remember { mutableStateOf(false) }
     val ordered = books.sortedByDescending { it.book.lastOpenedAt }
     val zone = ZoneId.systemDefault()
@@ -52,10 +52,16 @@ internal fun History(books: List<LibraryBook>, open: (Book) -> Unit, clear: () -
             val stamp = Instant.ofEpochMilli(latest.book.lastOpenedAt).atZone(zone)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ResumeBookCard(latest, { open(latest.book) }, "上次阅读 · ${dateLabel(stamp.toLocalDate())} ${stamp.format(DateTimeFormatter.ofPattern("HH:mm"))}")
-                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainer) {
-                    Row(Modifier.padding(horizontal = 12.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Outlined.Schedule, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("累计阅读 ${formatReadingTime(bookTimes[latest.book.id] ?: 0L)}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainer) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Outlined.Schedule, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("累计阅读 ${formatReadingTime(bookTimes[latest.book.id] ?: 0L)}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { remove(latest.book) }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Outlined.Close, "移出历史：${latest.book.title}", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -110,7 +116,9 @@ internal fun History(books: List<LibraryBook>, open: (Book) -> Unit, clear: () -
                                 Text("· 累计 ${formatReadingTime(bookTimes[row.book.id] ?: 0L)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        IconButton(onClick = { remove(row.book) }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Outlined.Close, "移出历史：${row.book.title}", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }

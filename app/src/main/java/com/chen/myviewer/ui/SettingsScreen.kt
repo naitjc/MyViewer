@@ -1,6 +1,11 @@
 package com.chen.myviewer.ui
 
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -35,6 +40,17 @@ import com.chen.myviewer.data.ReaderSettings
 @Composable
 internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns: Int, onColumns: (Int) -> Unit, expanded: List<String>, onToggleSection: (String) -> Unit) {
     val folders by vm.folders.collectAsStateWithLifecycle()
+    val usage by vm.storageUsage.collectAsStateWithLifecycle()
+    val backupBusy by vm.backupBusy.collectAsStateWithLifecycle()
+    var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
+    val exportBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) vm.exportBackup(uri)
+    }
+    val importBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) pendingRestoreUri = uri
+    }
+    LaunchedEffect(Unit) { vm.refreshStorageUsage() }
+    LaunchedEffect("storage" in expanded) { if ("storage" in expanded) vm.refreshStorageUsage() }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
@@ -96,9 +112,43 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
             }
         }
         item(key = "storage") {
-            PreferenceCard("存储管理", "清理可重新生成的临时图片", Icons.Outlined.CleaningServices, "storage" in expanded, { onToggleSection("storage") }) {
+            PreferenceCard("存储管理", "缓存 ${formatFileSize(usage.comicCacheBytes)} · 已下载 ${formatFileSize(usage.onlineDownloadsBytes)}", Icons.Outlined.CleaningServices, "storage" in expanded, { onToggleSection("storage") }) {
+                StorageUsageRow("漫画临时缓存", formatFileSize(usage.comicCacheBytes))
+                StorageUsageRow("离线下载章节", formatFileSize(usage.onlineDownloadsBytes))
+                StorageUsageRow("应用内书籍副本", formatFileSize(usage.copiedBooksBytes))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
                 Text("书籍、进度和书签会保留，漫画图片在阅读时重新加载。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onClick = { vm.clearComicCache() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Outlined.DeleteSweep, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("清理漫画图片缓存") }
+            }
+        }
+        item(key = "backup") {
+            PreferenceCard("备份与恢复", "导出或恢复书架、进度、书签与设置", Icons.Outlined.Backup, "backup" in expanded, { onToggleSection("backup") }) {
+                Text("将书库元数据、阅读进度、章节状态、书签、阅读时长及阅读设置导出为 JSON 文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            val date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+                            exportBackupLauncher.launch("myviewer-backup-$date.json")
+                        },
+                        enabled = !backupBusy,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Outlined.UploadFile, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("导出备份")
+                    }
+                    OutlinedButton(
+                        onClick = { importBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+                        enabled = !backupBusy,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Outlined.DownloadForOffline, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("恢复备份")
+                    }
+                }
             }
         }
         item(key = "about") {
@@ -107,6 +157,37 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
                 Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
+    pendingRestoreUri?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { pendingRestoreUri = null },
+            title = { Text("恢复本地备份？") },
+            text = { Text("将从所选备份文件恢复书库记录、阅读进度、书签、阅读时长和设置。") },
+            confirmButton = {
+                TextButton(onClick = { pendingRestoreUri = null; vm.importBackup(uri) }) { Text("恢复") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestoreUri = null }) { Text("取消") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun StorageUsageRow(label: String, sizeLabel: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(sizeLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+internal fun formatFileSize(bytes: Long): String {
+    val safe = bytes.coerceAtLeast(0L)
+    return when {
+        safe < 1024L -> "$safe B"
+        safe < 1024L * 1024L -> String.format(Locale.US, "%.1f KB", safe / 1024.0)
+        safe < 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f MB", safe / (1024.0 * 1024.0))
+        else -> String.format(Locale.US, "%.2f GB", safe / (1024.0 * 1024.0 * 1024.0))
     }
 }
 

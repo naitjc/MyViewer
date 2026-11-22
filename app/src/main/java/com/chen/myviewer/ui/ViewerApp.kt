@@ -13,6 +13,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -112,9 +113,13 @@ private val SettingsSectionSaver = listSaver<List<String>, String>(save = { it }
 @Composable
 fun ViewerApp(vm: MainViewModel) {
     val sources: com.chen.myviewer.source.SourceViewModel = viewModel()
+    val savedSources: com.chen.myviewer.source.SourceViewModel = viewModel(key = "saved-online")
     val novels: com.chen.myviewer.novel.NovelViewModel = viewModel()
     MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors) {
         val library by vm.library.collectAsStateWithLifecycle()
+        val folders by vm.folders.collectAsStateWithLifecycle()
+        val refreshingFolders by vm.refreshingFolders.collectAsStateWithLifecycle()
+        val checkingUpdates by vm.checkingUpdates.collectAsStateWithLifecycle()
         val reader by vm.reader.collectAsStateWithLifecycle()
         StatusBarAppearance(if (reader?.book?.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface)
         val loading by vm.loading.collectAsStateWithLifecycle()
@@ -132,9 +137,46 @@ fun ViewerApp(vm: MainViewModel) {
         val doubleTapTimeout = LocalViewConfiguration.current.doubleTapTimeoutMillis
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var savedNovelId by rememberSaveable { mutableStateOf<String?>(null) }
+        var savedOnlineBookId by rememberSaveable { mutableStateOf<String?>(null) }
         LaunchedEffect(savedNovelId) {
             savedNovelId?.let { id ->
                 if (novels.detail.value?.book?.id != id) vm.repository.dao.book(id)?.let(novels::showSaved)
+            }
+        }
+        LaunchedEffect(savedOnlineBookId) {
+            savedOnlineBookId?.let { id ->
+                if (savedSources.state.value.detail?.book?.id != id && savedSources.state.value.busy == null) {
+                    vm.repository.dao.book(id)?.let(savedSources::showSaved)
+                }
+            }
+        }
+        val sourceCatalogState = rememberLazyListState()
+        val sourceSearchState = rememberLazyListState()
+        val sourceDetailState = rememberLazyListState()
+        val savedOnlineDetailState = rememberLazyListState()
+        val sourceState by sources.state.collectAsStateWithLifecycle()
+        val savedSourceState by savedSources.state.collectAsStateWithLifecycle()
+        var appliedSearchSession by rememberSaveable { mutableLongStateOf(sourceState.searchSession) }
+        LaunchedEffect(sourceState.searchSession) {
+            if (appliedSearchSession != sourceState.searchSession) {
+                sourceSearchState.requestScrollToItem(0)
+                appliedSearchSession = sourceState.searchSession
+            }
+        }
+        var appliedDetailBookId by rememberSaveable { mutableStateOf<String?>(sourceState.detail?.book?.id) }
+        LaunchedEffect(sourceState.detail?.book?.id) {
+            val id = sourceState.detail?.book?.id
+            if (id != null && appliedDetailBookId != id) {
+                sourceDetailState.requestScrollToItem(0)
+                appliedDetailBookId = id
+            }
+        }
+        var appliedSavedDetailBookId by rememberSaveable { mutableStateOf<String?>(savedSourceState.detail?.book?.id) }
+        LaunchedEffect(savedSourceState.detail?.book?.id) {
+            val id = savedSourceState.detail?.book?.id
+            if (id != null && appliedSavedDetailBookId != id) {
+                savedOnlineDetailState.requestScrollToItem(0)
+                appliedSavedDetailBookId = id
             }
         }
         var shelfFilter by rememberSaveable { mutableStateOf("全部") }
@@ -155,12 +197,20 @@ fun ViewerApp(vm: MainViewModel) {
         val openBook: (Book) -> Unit = {
             focus.clearFocus(); keyboard?.hide()
             if (it.storage == "NOVEL") { novels.showSaved(it); savedNovelId = it.id; tab = 0 }
-            else if (it.storage == "ONLINE") { sources.showSaved(it); tab = 1 } else vm.open(it)
+            else if (it.storage == "ONLINE") {
+                if (it.unreadChapters > 0) vm.clearUnreadChapters(it.id)
+                savedSources.showSaved(it); savedOnlineBookId = it.id
+            } else vm.open(it)
         }
         var sourceDialog by remember { mutableStateOf(false) }
         var recursive by rememberSaveable { mutableStateOf(true) }
         var managing by remember { mutableStateOf<Book?>(null) }
+        var renaming by remember { mutableStateOf<Book?>(null) }
+        var renameInput by remember { mutableStateOf("") }
+        var batchMode by rememberSaveable { mutableStateOf(false) }
+        var selectedIds by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
         var relinking by remember { mutableStateOf<Book?>(null) }
+        BackHandler(batchMode) { batchMode = false; selectedIds = emptyList() }
         fun grant(uri: Uri) = runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }.isSuccess
         val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) { val temporary = uris.filterNot(::grant).toSet(); vm.selectedFiles(uris, temporary) } }
         val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) { val retained = grant(uri); vm.selectedFolder(uri, recursive, retained) } }
@@ -174,7 +224,7 @@ fun ViewerApp(vm: MainViewModel) {
             else if (savedNovelId != null) SavedNovelScreen(novels, vm) { savedNovelId = null; novels.back() }
             else Scaffold(
                 snackbarHost = { SnackbarHost(snackbar) },
-                topBar = { if (tab != 1) TopAppBar(
+                topBar = { if (tab != 1 && savedOnlineBookId == null) TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface,
                         titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -188,19 +238,41 @@ fun ViewerApp(vm: MainViewModel) {
                         )
                     },
                     actions = {
-                        if (tab == 0) FilledTonalButton(
-                            onClick = { sourceDialog = true },
-                            shape = RoundedCornerShape(50),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            ),
-                            modifier = Modifier.padding(end = 10.dp).heightIn(min = 36.dp).semantics { contentDescription = "导入书籍" }
-                        ) {
-                            Icon(Icons.Outlined.Add, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("导入", fontWeight = FontWeight.Medium)
+                        if (tab == 0) {
+                            if (folders.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { vm.refreshAllFolders() },
+                                    enabled = !refreshingFolders,
+                                    modifier = Modifier.semantics { contentDescription = "刷新文件夹" }
+                                ) {
+                                    if (refreshingFolders) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    else Icon(Icons.Outlined.Sync, "刷新文件夹")
+                                }
+                            }
+                            if (library.any { it.book.onShelf && it.book.storage == "ONLINE" }) {
+                                IconButton(
+                                    onClick = { vm.checkOnlineMangaUpdates() },
+                                    enabled = !checkingUpdates,
+                                    modifier = Modifier.semantics { contentDescription = "检查漫画更新" }
+                                ) {
+                                    if (checkingUpdates) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    else Icon(Icons.Outlined.Refresh, "检查漫画更新")
+                                }
+                            }
+                            FilledTonalButton(
+                                onClick = { sourceDialog = true },
+                                shape = RoundedCornerShape(50),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                ),
+                                modifier = Modifier.padding(end = 10.dp).heightIn(min = 36.dp).semantics { contentDescription = "导入书籍" }
+                            ) {
+                                Icon(Icons.Outlined.Add, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("导入", fontWeight = FontWeight.Medium)
+                            }
                         }
                     }
                 ) },
@@ -215,14 +287,19 @@ fun ViewerApp(vm: MainViewModel) {
                                 selected = isSelected,
                                 onClick = {
                                     focus.clearFocus(); keyboard?.hide()
-                                    if (index == 0) {
+                                    val closingSavedOnline = savedOnlineBookId != null
+                                    if (closingSavedOnline) {
+                                        savedOnlineBookId = null
+                                        savedSources.back()
+                                    }
+                                    if (index == 0 && !closingSavedOnline) {
                                         val now = SystemClock.uptimeMillis()
                                         if (lastShelfTap >= 0 && now - lastShelfTap <= doubleTapTimeout) returnToTop()
                                         lastShelfTap = now
                                     } else lastShelfTap = -1
                                     tab = index
                                 },
-                                modifier = if (index == 0) Modifier.semantics { customActions = listOf(CustomAccessibilityAction("回到书库顶部") { tab = 0; returnToTop(); true }) } else Modifier,
+                                modifier = if (index == 0) Modifier.semantics { customActions = listOf(CustomAccessibilityAction("回到书库顶部") { savedOnlineBookId = null; savedSources.back(); tab = 0; returnToTop(); true }) } else Modifier,
                                 colors = NavigationBarItemDefaults.colors(
                                     indicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
                                     selectedIconColor = MaterialTheme.colorScheme.primary,
@@ -237,19 +314,42 @@ fun ViewerApp(vm: MainViewModel) {
                     }
                 } },
             ) { padding -> Box(Modifier.padding(padding)) {
-                when (tab) {
-                    0 -> Bookshelf(books = library.filter { it.book.onShelf }, sort = librarySort, onSort = vm::setLibrarySort,
+                if (savedOnlineBookId != null) {
+                    SavedOnlineMangaScreen(
+                        vm = savedSources,
+                        reader = vm,
+                        listState = savedOnlineDetailState,
+                        backLabel = if (tab == 2) "返回历史" else "返回书库",
+                        onBack = { savedOnlineBookId = null; savedSources.back() }
+                    )
+                } else when (tab) {
+                    0 -> Bookshelf(
+                        books = library.filter { it.book.onShelf }, sort = librarySort, onSort = vm::setLibrarySort,
                         filter = shelfFilter, onFilter = { shelfFilter = it }, completion = shelfCompletion, onCompletion = { shelfCompletion = it }, query = shelfQuery, onQuery = { shelfQuery = it },
                         columns = libraryColumns, state = shelfState, onTop = returnToTop,
-                        open = openBook, manage = { managing = it }, import = { sourceDialog = true })
-                    1 -> SourceScreen(sources, vm)
+                        open = openBook, manage = { managing = it }, import = { sourceDialog = true },
+                        batchMode = batchMode,
+                        selectedIds = selectedIds.toSet(),
+                        onToggleSelect = { id -> selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id },
+                        onSelectAll = { ids -> selectedIds = ids },
+                        onExitBatch = { batchMode = false; selectedIds = emptyList() },
+                        onBatchComplete = { completed -> vm.setCompletedBatch(selectedIds.toSet(), completed); batchMode = false; selectedIds = emptyList() },
+                        onBatchRemove = { vm.hideBatch(selectedIds.toSet()); batchMode = false; selectedIds = emptyList() },
+                    )
+                    1 -> SourceScreen(
+                        vm = sources,
+                        reader = vm,
+                        catalogState = sourceCatalogState,
+                        searchState = sourceSearchState,
+                        detailState = sourceDetailState,
+                    )
                     2 -> {
                         val today by produceState(LocalDate.now().toString()) {
                             while (isActive) { delay(30000); value = LocalDate.now().toString() }
                         }
                         val totals by remember(today) { vm.readingTotals(today) }.collectAsStateWithLifecycle(ReadingTotals())
                         val bookTimes by vm.bookReadingTimes.collectAsStateWithLifecycle()
-                        History(library.filter { it.book.inHistory }, openBook, vm::clearHistory, { tab = 0 }, totals, bookTimes)
+                        History(library.filter { it.book.inHistory }, openBook, vm::clearHistory, { tab = 0 }, totals, bookTimes, vm::removeFromHistory)
                     }
                     else -> SettingsScreen(vm, settings, libraryColumns, vm::setLibraryColumns, expandedSettings) { section ->
                         expandedSettings = if (section in expandedSettings) expandedSettings - section else expandedSettings + section
@@ -268,14 +368,51 @@ fun ViewerApp(vm: MainViewModel) {
             Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(recursive, { recursive = it }); Text("扫描子文件夹") }
         } }, confirmButton = { TextButton(onClick = { sourceDialog = false }) { Text("关闭") } })
         importing?.let { ImportDialog(it, vm) }
-        if (managing != null) AlertDialog(onDismissRequest = { managing = null }, title = { Text(managing!!.title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (managing!!.completed) TextButton(onClick = { vm.setCompleted(managing!!, false); managing = null }) {
-                Text("取消已读完标记")
-            }
-            Text(if (managing!!.storage == "NOVEL") "已保存的小说" else if (managing!!.storage == "ONLINE") "在线漫画" else "${if (managing!!.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (managing!!.storage == "COPY") "应用内副本" else "直接读取"}")
-            Text("移出书架后仍保留文件、进度、书签和历史。", style = MaterialTheme.typography.bodySmall)
-            if (managing!!.storage !in setOf("ONLINE", "NOVEL")) TextButton(onClick = { relinking = managing; managing = null; relink.launch(arrayOf("*/*")) }) { Text("重新定位原文件，改为直接读取") }
-        } }, confirmButton = { TextButton(onClick = { vm.hide(managing!!); managing = null }) { Text("移出书架") } }, dismissButton = { TextButton(onClick = { managing = null }) { Text("关闭") } })
+        if (managing != null) {
+            val book = managing!!
+            AlertDialog(onDismissRequest = { managing = null }, title = { Text(book.title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (book.storage == "NOVEL") "已保存的小说" else if (book.storage == "ONLINE") "在线漫画" else "${if (book.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (book.storage == "COPY") "应用内副本" else "直接读取"}")
+                Text("移出书架后仍保留文件、进度、书签和历史。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = { vm.setPinned(book, !book.pinned); managing = null }) {
+                    Text(if (book.pinned) "取消置顶" else "置顶到书架")
+                }
+                TextButton(onClick = { vm.setCompleted(book, !book.completed); managing = null }) {
+                    Text(if (book.completed) "取消已读完标记" else "标记为已读完")
+                }
+                TextButton(onClick = { renameInput = book.title; renaming = book; managing = null }) {
+                    Text("重命名")
+                }
+                TextButton(onClick = { batchMode = true; selectedIds = listOf(book.id); managing = null }) {
+                    Text("批量管理")
+                }
+                if (book.storage !in setOf("ONLINE", "NOVEL")) TextButton(onClick = { relinking = book; managing = null; relink.launch(arrayOf("*/*")) }) { Text("重新定位原文件，改为直接读取") }
+            } }, confirmButton = { TextButton(onClick = { vm.hide(book); managing = null }) { Text("移出书架") } }, dismissButton = { TextButton(onClick = { managing = null }) { Text("关闭") } })
+        }
+        renaming?.let { book ->
+            AlertDialog(
+                onDismissRequest = { renaming = null },
+                title = { Text("重命名书籍") },
+                text = {
+                    OutlinedTextField(
+                        value = renameInput,
+                        onValueChange = { renameInput = it },
+                        singleLine = true,
+                        label = { Text("书名") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { vm.rename(book, renameInput); renaming = null },
+                        enabled = renameInput.trim().isNotEmpty()
+                    ) { Text("保存") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { renaming = null }) { Text("取消") }
+                }
+            )
+        }
         if (error != null) AlertDialog(onDismissRequest = { vm.error.value = null }, title = { Text("暂时无法打开") }, text = { Text(error!!) }, confirmButton = {
             failedBook?.takeIf { it.storage != "ONLINE" }?.let { failed -> TextButton(onClick = { vm.error.value = null; relinking = failed; relink.launch(arrayOf("*/*")) }) { Text("重新定位文件") } }
         }, dismissButton = { TextButton(onClick = { vm.error.value = null }) { Text("关闭") } })

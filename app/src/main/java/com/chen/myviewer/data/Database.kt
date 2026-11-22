@@ -21,6 +21,8 @@ data class Book(
     val inHistory: Boolean = false,
     val encoding: String = "AUTO",
     @ColumnInfo(defaultValue = "0") val completed: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val pinned: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val unreadChapters: Int = 0,
 )
 
 @Entity(tableName = "positions", foreignKeys = [ForeignKey(entity = Book::class, parentColumns = ["id"], childColumns = ["bookId"], onDelete = ForeignKey.CASCADE)])
@@ -97,6 +99,18 @@ interface ViewerDao {
     @Query("UPDATE books SET onShelf=:visible WHERE id=:id") suspend fun shelf(id: String, visible: Boolean)
     @Query("UPDATE books SET completed=:completed WHERE id=:id")
     suspend fun setCompleted(id: String, completed: Boolean)
+    @Query("UPDATE books SET title=:title WHERE id=:id")
+    suspend fun rename(id: String, title: String)
+    @Query("UPDATE books SET pinned=:pinned WHERE id=:id")
+    suspend fun setPinned(id: String, pinned: Boolean)
+    @Query("UPDATE books SET unreadChapters=:count WHERE id=:id")
+    suspend fun setUnreadChapters(id: String, count: Int)
+    @Query("UPDATE books SET onShelf=0 WHERE id IN (:ids)")
+    suspend fun hideBatch(ids: List<String>)
+    @Query("UPDATE books SET completed=:completed WHERE id IN (:ids)")
+    suspend fun setCompletedBatch(ids: List<String>, completed: Boolean)
+    @Query("UPDATE books SET inHistory=0 WHERE id=:id")
+    suspend fun removeFromHistory(id: String)
     @Query("UPDATE books SET inHistory=0") suspend fun clearHistory()
     @Query("UPDATE books SET sourceUri=:uri, storage='DIRECT', localPath=NULL WHERE id=:id") suspend fun relink(id: String, uri: String)
     @Query("UPDATE books SET encoding=:encoding WHERE id=:id") suspend fun encoding(id: String, encoding: String)
@@ -161,12 +175,40 @@ interface ViewerDao {
     fun observeReadingTotals(today: String): Flow<ReadingTotals>
     @Query("SELECT bookId, SUM(durationMs) AS totalMs FROM reading_times GROUP BY bookId")
     fun observeBookReadingTimes(): Flow<List<BookReadingTime>>
+    @Query("SELECT * FROM books") suspend fun allBooks(): List<Book>
+    @Query("SELECT * FROM positions") suspend fun allPositions(): List<ReadingPosition>
+    @Query("SELECT * FROM chapter_positions") suspend fun allChapterPositions(): List<ChapterPosition>
+    @Query("SELECT * FROM book_preferences") suspend fun allBookPreferences(): List<BookPreferences>
+    @Query("SELECT * FROM bookmarks") suspend fun allBookmarks(): List<Bookmark>
+    @Query("SELECT * FROM reading_times") suspend fun allReadingTimes(): List<ReadingTimeRecord>
+    @Upsert suspend fun putChapterPosition(position: ChapterPosition)
+    @Transaction suspend fun restoreBackup(
+        books: List<Book>,
+        positions: List<ReadingPosition>,
+        chapters: List<ChapterPosition>,
+        prefs: List<BookPreferences>,
+        bookmarks: List<Bookmark>,
+        times: List<ReadingTimeRecord>,
+    ) {
+        books.forEach { putBook(it) }
+        positions.forEach { putPosition(it) }
+        chapters.forEach { putChapterPosition(it) }
+        prefs.forEach { putPreferences(it) }
+        bookmarks.forEach { putBookmark(it) }
+        saveReadingTimes(times)
+    }
 }
 
-@Database(entities = [Book::class, ReadingPosition::class, ChapterPosition::class, BookPreferences::class, Bookmark::class, FolderSource::class, ReadingTimeRecord::class], version = 5, exportSchema = true)
+@Database(entities = [Book::class, ReadingPosition::class, ChapterPosition::class, BookPreferences::class, Bookmark::class, FolderSource::class, ReadingTimeRecord::class], version = 6, exportSchema = true)
 abstract class ViewerDatabase : RoomDatabase() {
     abstract fun dao(): ViewerDao
     companion object {
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE books ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE books ADD COLUMN unreadChapters INTEGER NOT NULL DEFAULT 0")
+            }
+        }
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE chapter_positions ADD COLUMN textOffset INTEGER NOT NULL DEFAULT 0")
