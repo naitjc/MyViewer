@@ -30,6 +30,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
@@ -414,22 +416,27 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
     var deleteChapter by remember { mutableStateOf<SourceChapter?>(null) }
     LazyColumn(state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
-                shadowElevation = 0.5.dp,
-                modifier = Modifier.fillMaxWidth()
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f), Color.Transparent)))
             ) {
                 Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    OnlineCover(vm.repository, title.manga.cover, Modifier.width(105.dp))
+                    OnlineCover(vm.repository, title.manga.cover, Modifier.width(112.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(title.manga.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(title.manga.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         if (title.manga.authors.isNotEmpty()) Text(title.manga.authors.joinToString(" / "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainer) {
-                            Text(title.sourceId, Modifier.padding(horizontal = 8.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainer) {
+                                Text(title.sourceId, Modifier.padding(horizontal = 8.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                            }
+                            if (book.completed) {
+                                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer) {
+                                    Text("已读完", Modifier.padding(horizontal = 8.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
                         }
-                        if (book.completed) Text("已读完", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -440,9 +447,18 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                     onClick = vm::addToShelf,
                     enabled = !book.onShelf && state.busy == null,
                     shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        disabledContainerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                        disabledContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
                     modifier = if (selected == null) Modifier.fillMaxWidth() else Modifier
                 ) {
-                    Icon(if (book.onShelf) Icons.Outlined.Check else Icons.Outlined.BookmarkAdd, null, Modifier.size(18.dp))
+                    Icon(
+                        if (book.onShelf) Icons.Outlined.Check else Icons.Outlined.BookmarkAdd,
+                        null,
+                        Modifier.size(18.dp),
+                        tint = if (book.onShelf) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text(if (book.onShelf) "已加入书架" else "加入书架")
                 }
@@ -489,6 +505,9 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
         item {
             Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("下载", style = MaterialTheme.typography.titleSmall)
+                    }
                     OutlinedButton(onClick = { chooseFolder(null) }, enabled = !exportState.running && chapters.any { !it.locked }, shape = RoundedCornerShape(50)) {
                         Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -548,10 +567,14 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
             val saved = progress[chapter.key]
             val completed = saved?.completed == true
             val downloaded = chapter.key in state.downloaded
+            val isCurrent = chapter.key == selected?.key
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLowest,
+                border = BorderStroke(
+                    1.dp,
+                    if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                ),
                 modifier = Modifier.fillMaxWidth().animateItem()
             ) {
                 Row(
@@ -559,7 +582,13 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(chapter.label, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+                        Text(
+                            chapter.label,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            fontWeight = FontWeight.Medium,
+                            color = if (completed) MaterialTheme.colorScheme.onSurfaceVariant else LocalContentColor.current
+                        )
                         val status = listOfNotNull(if (chapter.locked) "已锁定" else null, if (downloaded) "已下载" else null,
                             when {
                                 completed -> "已读完"
@@ -569,13 +598,19 @@ private fun MangaDetails(vm: SourceViewModel, reader: MainViewModel, state: Sour
                             }).joinToString(" · ")
                         if (status.isNotBlank()) Text(status, color = if (completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
-                    IconButton(onClick = { chooseFolder(chapter.key) }, enabled = !chapter.locked && !exportState.running) { Icon(Icons.Outlined.FolderOpen, "保存 ${chapter.label} 到文件夹") }
+                    IconButton(onClick = { chooseFolder(chapter.key) }, enabled = !chapter.locked && !exportState.running) {
+                        Icon(Icons.Outlined.FolderOpen, "保存 ${chapter.label} 到文件夹", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     val isActiveDownload = chapter.key == state.activeDownloadKey
                     val isQueuedDownload = chapter.key in state.downloadQueue
-                    if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = !isActiveDownload) { Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载") }
+                    if (downloaded) IconButton(onClick = { deleteChapter = chapter }, enabled = !isActiveDownload) {
+                        Icon(Icons.Outlined.DeleteOutline, "删除 ${chapter.label} 的下载", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     else if (isActiveDownload) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
                     else if (isQueuedDownload) Icon(Icons.Outlined.HourglassEmpty, "排队下载中", Modifier.padding(12.dp).size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                    else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked) { Icon(Icons.Outlined.Download, "下载 ${chapter.label}") }
+                    else IconButton(onClick = { vm.download(chapter) }, enabled = !chapter.locked) {
+                        Icon(Icons.Outlined.Download, "下载 ${chapter.label}", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -595,10 +630,18 @@ private fun OnlineCover(repository: SourceRepository, url: String?, modifier: Mo
         modifier.aspectRatio(.72f),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.secondaryContainer,
-        shadowElevation = 2.dp,
+        shadowElevation = 4.dp,
         border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
     ) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        else Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.AutoStories, null, tint = MaterialTheme.colorScheme.onSecondaryContainer) }
+        else Box(
+            Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.surfaceContainerHigh))),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Outlined.AutoStories, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f))
+                Text("暂无封面", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f))
+            }
+        }
     }
 }

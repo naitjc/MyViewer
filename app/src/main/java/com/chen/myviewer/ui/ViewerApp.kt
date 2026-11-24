@@ -9,6 +9,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -56,58 +58,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.time.LocalDate
 
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF2D5A46),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFD8E8DD),
-    onPrimaryContainer = Color(0xFF143525),
-    secondary = Color(0xFF566B5D),
-    onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFE5ECE6),
-    onSecondaryContainer = Color(0xFF1E3126),
-    tertiary = Color(0xFF9C6B43),
-    onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFF3E5D8),
-    onTertiaryContainer = Color(0xFF3E2611),
-    background = Color(0xFFF6F4EE),
-    onBackground = Color(0xFF1C2420),
-    surface = Color(0xFFF6F4EE),
-    onSurface = Color(0xFF1C2420),
-    surfaceVariant = Color(0xFFE9E6DD),
-    onSurfaceVariant = Color(0xFF5C6660),
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFFAF8F3),
-    surfaceContainer = Color(0xFFEEEBE3),
-    surfaceContainerHigh = Color(0xFFE6E2D8),
-    outline = Color(0xFFB8B3A7),
-    outlineVariant = Color(0xFFDDD8CC),
-)
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFF8EC5A5),
-    onPrimary = Color(0xFF0D2619),
-    primaryContainer = Color(0xFF213C2E),
-    onPrimaryContainer = Color(0xFFD3ECDC),
-    secondary = Color(0xFFA7BBAE),
-    onSecondary = Color(0xFF16281E),
-    secondaryContainer = Color(0xFF27362D),
-    onSecondaryContainer = Color(0xFFD6E4DA),
-    tertiary = Color(0xFFD9A97E),
-    onTertiary = Color(0xFF341E0B),
-    tertiaryContainer = Color(0xFF3D2E21),
-    onTertiaryContainer = Color(0xFFF3E3D3),
-    background = Color(0xFF121715),
-    onBackground = Color(0xFFE4EBE6),
-    surface = Color(0xFF121715),
-    onSurface = Color(0xFFE4EBE6),
-    surfaceVariant = Color(0xFF222B26),
-    onSurfaceVariant = Color(0xFF9AA89F),
-    surfaceContainerLowest = Color(0xFF181F1C),
-    surfaceContainerLow = Color(0xFF1B231F),
-    surfaceContainer = Color(0xFF212B26),
-    surfaceContainerHigh = Color(0xFF29352F),
-    outline = Color(0xFF4C5B52),
-    outlineVariant = Color(0xFF2E3B34),
-)
 private val SettingsSectionSaver = listSaver<List<String>, String>(save = { it }, restore = { it.toList() })
 
 @Composable
@@ -115,7 +65,7 @@ fun ViewerApp(vm: MainViewModel) {
     val sources: com.chen.myviewer.source.SourceViewModel = viewModel()
     val savedSources: com.chen.myviewer.source.SourceViewModel = viewModel(key = "saved-online")
     val novels: com.chen.myviewer.novel.NovelViewModel = viewModel()
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors) {
+    MyViewerTheme {
         val library by vm.library.collectAsStateWithLifecycle()
         val folders by vm.folders.collectAsStateWithLifecycle()
         val refreshingFolders by vm.refreshingFolders.collectAsStateWithLifecycle()
@@ -322,37 +272,39 @@ fun ViewerApp(vm: MainViewModel) {
                         backLabel = if (tab == 2) "返回历史" else "返回书库",
                         onBack = { savedOnlineBookId = null; savedSources.back() }
                     )
-                } else when (tab) {
-                    0 -> Bookshelf(
-                        books = library.filter { it.book.onShelf }, sort = librarySort, onSort = vm::setLibrarySort,
-                        filter = shelfFilter, onFilter = { shelfFilter = it }, completion = shelfCompletion, onCompletion = { shelfCompletion = it }, query = shelfQuery, onQuery = { shelfQuery = it },
-                        columns = libraryColumns, state = shelfState, onTop = returnToTop,
-                        open = openBook, manage = { managing = it }, import = { sourceDialog = true },
-                        batchMode = batchMode,
-                        selectedIds = selectedIds.toSet(),
-                        onToggleSelect = { id -> selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id },
-                        onSelectAll = { ids -> selectedIds = ids },
-                        onExitBatch = { batchMode = false; selectedIds = emptyList() },
-                        onBatchComplete = { completed -> vm.setCompletedBatch(selectedIds.toSet(), completed); batchMode = false; selectedIds = emptyList() },
-                        onBatchRemove = { vm.hideBatch(selectedIds.toSet()); batchMode = false; selectedIds = emptyList() },
-                    )
-                    1 -> SourceScreen(
-                        vm = sources,
-                        reader = vm,
-                        catalogState = sourceCatalogState,
-                        searchState = sourceSearchState,
-                        detailState = sourceDetailState,
-                    )
-                    2 -> {
-                        val today by produceState(LocalDate.now().toString()) {
-                            while (isActive) { delay(30000); value = LocalDate.now().toString() }
+                } else Crossfade(targetState = tab, animationSpec = tween(180), label = "tab") { currentTab ->
+                    when (currentTab) {
+                        0 -> Bookshelf(
+                            books = library.filter { it.book.onShelf }, sort = librarySort, onSort = vm::setLibrarySort,
+                            filter = shelfFilter, onFilter = { shelfFilter = it }, completion = shelfCompletion, onCompletion = { shelfCompletion = it }, query = shelfQuery, onQuery = { shelfQuery = it },
+                            columns = libraryColumns, state = shelfState, onTop = returnToTop,
+                            open = openBook, manage = { managing = it }, import = { sourceDialog = true },
+                            batchMode = batchMode,
+                            selectedIds = selectedIds.toSet(),
+                            onToggleSelect = { id -> selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id },
+                            onSelectAll = { ids -> selectedIds = ids },
+                            onExitBatch = { batchMode = false; selectedIds = emptyList() },
+                            onBatchComplete = { completed -> vm.setCompletedBatch(selectedIds.toSet(), completed); batchMode = false; selectedIds = emptyList() },
+                            onBatchRemove = { vm.hideBatch(selectedIds.toSet()); batchMode = false; selectedIds = emptyList() },
+                        )
+                        1 -> SourceScreen(
+                            vm = sources,
+                            reader = vm,
+                            catalogState = sourceCatalogState,
+                            searchState = sourceSearchState,
+                            detailState = sourceDetailState,
+                        )
+                        2 -> {
+                            val today by produceState(LocalDate.now().toString()) {
+                                while (isActive) { delay(30000); value = LocalDate.now().toString() }
+                            }
+                            val totals by remember(today) { vm.readingTotals(today) }.collectAsStateWithLifecycle(ReadingTotals())
+                            val bookTimes by vm.bookReadingTimes.collectAsStateWithLifecycle()
+                            History(library.filter { it.book.inHistory }, openBook, vm::clearHistory, { tab = 0 }, totals, bookTimes, vm::removeFromHistory)
                         }
-                        val totals by remember(today) { vm.readingTotals(today) }.collectAsStateWithLifecycle(ReadingTotals())
-                        val bookTimes by vm.bookReadingTimes.collectAsStateWithLifecycle()
-                        History(library.filter { it.book.inHistory }, openBook, vm::clearHistory, { tab = 0 }, totals, bookTimes, vm::removeFromHistory)
-                    }
-                    else -> SettingsScreen(vm, settings, libraryColumns, vm::setLibraryColumns, expandedSettings) { section ->
-                        expandedSettings = if (section in expandedSettings) expandedSettings - section else expandedSettings + section
+                        else -> SettingsScreen(vm, settings, libraryColumns, vm::setLibraryColumns, expandedSettings) { section ->
+                            expandedSettings = if (section in expandedSettings) expandedSettings - section else expandedSettings + section
+                        }
                     }
                 }
             } }
@@ -361,33 +313,91 @@ fun ViewerApp(vm: MainViewModel) {
             BackHandler { vm.closeReader() }
             AlertDialog(onDismissRequest = { vm.closeReader() }, title = { Text("正在打开") }, text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(Modifier.size(24.dp)); Text(loadingBook.title) } }, confirmButton = {}, dismissButton = { TextButton(onClick = { vm.closeReader() }) { Text("取消") } })
         }
-        if (sourceDialog) AlertDialog(onDismissRequest = { sourceDialog = false }, title = { Text("导入本地书籍") }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("支持 TXT 小说和 ZIP 漫画。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FilledTonalButton(onClick = { sourceDialog = false; files.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.InsertDriveFile, null); Spacer(Modifier.width(8.dp)); Text("选择文件，可多选") }
-            FilledTonalButton(onClick = { sourceDialog = false; folder.launch(null) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.FolderOpen, null); Spacer(Modifier.width(8.dp)); Text("选择文件夹扫描") }
+        if (sourceDialog) AlertDialog(onDismissRequest = { sourceDialog = false }, title = { Text("导入本地书籍") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("支持 TXT 小说和 ZIP 漫画。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            ImportOptionTile(
+                icon = Icons.Outlined.InsertDriveFile,
+                title = "选择文件，可多选",
+                caption = "TXT 小说或 ZIP 漫画",
+                onClick = { sourceDialog = false; files.launch(arrayOf("*/*")) }
+            )
+            ImportOptionTile(
+                icon = Icons.Outlined.FolderOpen,
+                title = "选择文件夹扫描",
+                caption = "批量导入文件夹中的书籍",
+                onClick = { sourceDialog = false; folder.launch(null) }
+            )
             Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(recursive, { recursive = it }); Text("扫描子文件夹") }
         } }, confirmButton = { TextButton(onClick = { sourceDialog = false }) { Text("关闭") } })
         importing?.let { ImportDialog(it, vm) }
         if (managing != null) {
             val book = managing!!
-            AlertDialog(onDismissRequest = { managing = null }, title = { Text(book.title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(if (book.storage == "NOVEL") "已保存的小说" else if (book.storage == "ONLINE") "在线漫画" else "${if (book.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (book.storage == "COPY") "应用内副本" else "直接读取"}")
-                Text("移出书架后仍保留文件、进度、书签和历史。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(4.dp))
-                TextButton(onClick = { vm.setPinned(book, !book.pinned); managing = null }) {
-                    Text(if (book.pinned) "取消置顶" else "置顶到书架")
+            val subtitle = if (book.storage == "NOVEL") "已保存的小说" else if (book.storage == "ONLINE") "在线漫画" else "${if (book.kind == "TEXT") "TXT 小说" else "ZIP 漫画"} · ${if (book.storage == "COPY") "应用内副本" else "直接读取"}"
+            ModalBottomSheet(
+                onDismissRequest = { managing = null },
+                containerColor = MaterialTheme.colorScheme.surface,
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ) {
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        BookCover(book, Modifier.width(48.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(book.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                    ListItem(
+                        headlineContent = { Text(if (book.pinned) "取消置顶" else "置顶到书架") },
+                        leadingContent = { Icon(Icons.Outlined.PushPin, null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { vm.setPinned(book, !book.pinned); managing = null }
+                    )
+                    ListItem(
+                        headlineContent = { Text(if (book.completed) "取消已读完标记" else "标记为已读完") },
+                        leadingContent = { Icon(if (book.completed) Icons.Outlined.RadioButtonUnchecked else Icons.Outlined.CheckCircle, null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { vm.setCompleted(book, !book.completed); managing = null }
+                    )
+                    ListItem(
+                        headlineContent = { Text("重命名") },
+                        leadingContent = { Icon(Icons.Outlined.Edit, null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { renameInput = book.title; renaming = book; managing = null }
+                    )
+                    ListItem(
+                        headlineContent = { Text("批量管理") },
+                        leadingContent = { Icon(Icons.Outlined.Checklist, null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { batchMode = true; selectedIds = listOf(book.id); managing = null }
+                    )
+                    if (book.storage !in setOf("ONLINE", "NOVEL")) {
+                        ListItem(
+                            headlineContent = { Text("重新定位原文件，改为直接读取") },
+                            leadingContent = { Icon(Icons.Outlined.FindInPage, null) },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            modifier = Modifier.clickable { relinking = book; managing = null; relink.launch(arrayOf("*/*")) }
+                        )
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                    ListItem(
+                        headlineContent = { Text("移出书架", color = MaterialTheme.colorScheme.error) },
+                        leadingContent = { Icon(Icons.Outlined.RemoveCircleOutline, null, tint = MaterialTheme.colorScheme.error) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { vm.hide(book); managing = null }
+                    )
+                    Text(
+                        "移出书架后仍保留文件、进度、书签和历史。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                    )
                 }
-                TextButton(onClick = { vm.setCompleted(book, !book.completed); managing = null }) {
-                    Text(if (book.completed) "取消已读完标记" else "标记为已读完")
-                }
-                TextButton(onClick = { renameInput = book.title; renaming = book; managing = null }) {
-                    Text("重命名")
-                }
-                TextButton(onClick = { batchMode = true; selectedIds = listOf(book.id); managing = null }) {
-                    Text("批量管理")
-                }
-                if (book.storage !in setOf("ONLINE", "NOVEL")) TextButton(onClick = { relinking = book; managing = null; relink.launch(arrayOf("*/*")) }) { Text("重新定位原文件，改为直接读取") }
-            } }, confirmButton = { TextButton(onClick = { vm.hide(book); managing = null }) { Text("移出书架") } }, dismissButton = { TextButton(onClick = { managing = null }) { Text("关闭") } })
+            }
         }
         renaming?.let { book ->
             AlertDialog(
@@ -468,44 +478,41 @@ internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
     }
     Surface(
         modifier.aspectRatio(.72f),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         color = cloth.start,
-        shadowElevation = 2.dp,
+        shadowElevation = 1.dp,
         border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
     ) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), book.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else BoxWithConstraints(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(cloth.start, cloth.end)))) {
-            val compact = maxWidth < 80.dp
-            val tiny = maxWidth < 56.dp
+            val w = maxWidth.value
+            val titleFontSize = (w * 0.15f).coerceIn(9f, 18f)
+            val titleLineHeight = titleFontSize * 1.3f
+            val contentPad = (w * 0.09f).coerceIn(5f, 14f).dp
+            val typeFontSize = (w * 0.07f).coerceIn(7f, 10f).sp
+            val tiny = w < 56f
             val typeLabel = if (book.storage == "NOVEL") "小说" else if (book.kind == "TEXT") "TXT" else if (book.storage == "ONLINE") "在线" else "ZIP"
             Box(Modifier.fillMaxHeight().fillMaxWidth(0.06f).background(cloth.ink.copy(alpha = 0.08f)))
             Box(Modifier.padding(start = 3.dp).width(1.dp).fillMaxHeight().background(Color.White.copy(alpha = if (dark) 0.06f else 0.35f)))
             Column(
-                Modifier.fillMaxSize().padding(
-                    start = if (tiny) 7.dp else if (compact) 10.dp else 14.dp,
-                    end = if (tiny) 5.dp else if (compact) 8.dp else 11.dp,
-                    top = if (tiny) 6.dp else if (compact) 8.dp else 11.dp,
-                    bottom = if (tiny) 6.dp else if (compact) 8.dp else 11.dp,
-                ),
+                Modifier.fillMaxSize().padding(contentPad),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(shape = RoundedCornerShape(50), color = cloth.ink.copy(alpha = 0.09f)) {
-                    Text(
-                        typeLabel,
-                        fontSize = if (tiny) 7.sp else 9.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = cloth.ink.copy(alpha = 0.78f),
-                        modifier = Modifier.padding(horizontal = if (tiny) 4.dp else 6.dp, vertical = if (tiny) 1.dp else 2.dp)
-                    )
-                }
+                Text(
+                    typeLabel,
+                    fontSize = typeFontSize,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 1.sp,
+                    color = cloth.ink.copy(alpha = 0.55f)
+                )
                 Text(
                     book.title.take(24),
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = if (tiny) 10.sp else if (compact) 13.sp else 18.sp,
-                    lineHeight = if (tiny) 13.sp else if (compact) 17.sp else 23.sp,
+                    fontSize = titleFontSize.sp,
+                    lineHeight = titleLineHeight.sp,
                     color = cloth.ink,
-                    maxLines = if (tiny) 3 else 4,
+                    maxLines = if (w < 64f) 3 else 4,
                     overflow = TextOverflow.Ellipsis
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(if (tiny) 2.dp else 3.dp)) {
@@ -566,5 +573,40 @@ internal fun EmptyState(title: String, detail: String, icon: androidx.compose.ui
         Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Spacer(Modifier.height(24.dp))
         action?.invoke()
+    }
+}
+
+@Composable
+private fun ImportOptionTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    caption: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(caption, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }

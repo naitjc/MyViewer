@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,6 +41,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -132,6 +135,27 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
         }
     }
 
+    val menuColorScheme = if (session.comic != null) darkColorScheme(
+        primary = Color(0xFF8EC5A5),
+        onPrimary = Color(0xFF0D2619),
+        primaryContainer = Color(0xFF213C2E),
+        onPrimaryContainer = Color(0xFFD3ECDC),
+        surface = Color(0xFF171D1A),
+        surfaceContainerLowest = Color(0xFF181F1C),
+        onSurface = Color.White,
+        outlineVariant = Color(0xFF2E3B34),
+    ) else {
+        val p = readingPalette(settings.background)
+        val base = if (p.id == "NIGHT") DarkColors else LightColors
+        base.copy(
+            surface = lerp(p.paper, p.ink, 0.04f),
+            onSurface = p.ink,
+            onSurfaceVariant = p.ink.copy(alpha = 0.68f),
+            surfaceContainerLowest = p.paper,
+            outlineVariant = p.ink.copy(alpha = 0.12f),
+        )
+    }
+
     val rootInsetsModifier = if (settings.immersiveMode) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
     Box(Modifier.fillMaxSize().then(if (sheet != null) Modifier.clearAndSetSemantics { } else Modifier).background(if (session.book.kind == "COMIC") Color.Black else MaterialTheme.colorScheme.surface).then(rootInsetsModifier).pointerInput(automatic) {
         awaitEachGesture {
@@ -157,17 +181,6 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                 flush = { textView?.flush() })
         } else if (session.comic != null) ComicContent(vm, session, settings, automatic, finish, { pauseAutomatic(); menu = !menu })
 
-        val menuColorScheme = if (session.comic != null) darkColorScheme(
-            primary = Color(0xFF8EC5A5),
-            onPrimary = Color(0xFF0D2619),
-            primaryContainer = Color(0xFF213C2E),
-            onPrimaryContainer = Color(0xFFD3ECDC),
-            surface = Color(0xFF171D1A),
-            surfaceContainerLowest = Color(0xFF181F1C),
-            onSurface = Color.White,
-            outlineVariant = Color(0xFF2E3B34),
-        ) else MaterialTheme.colorScheme
-
         AnimatedVisibility(
             visible = menu,
             enter = fadeIn(tween(150)) + slideInVertically(tween(150)) { -it / 2 },
@@ -175,18 +188,15 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
             MaterialTheme(colorScheme = menuColorScheme) {
-                Surface(Modifier.fillMaxWidth().then(if (settings.immersiveMode) Modifier.statusBarsPadding() else Modifier), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f), contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = 3.dp) {
-                    Column {
-                        Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = close) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回书架") }
-                            Column(Modifier.weight(1f)) {
-                                Text(session.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                                session.chapter?.let { Text(it.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall) }
-                                session.novelChapter?.let { Text(it.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall) }
-                            }
-                            if (session.text != null) IconButton(onClick = { sheet = "bookmarks" }) { Icon(Icons.Outlined.BookmarkBorder, "查看书签") }
+                Surface(Modifier.fillMaxWidth().then(if (settings.immersiveMode) Modifier.statusBarsPadding() else Modifier), color = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface, shadowElevation = 2.dp) {
+                    Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = close) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回书架") }
+                        Column(Modifier.weight(1f)) {
+                            Text(session.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                            session.chapter?.let { Text(it.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall) }
+                            session.novelChapter?.let { Text(it.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall) }
                         }
-                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                        if (session.text != null) IconButton(onClick = { sheet = "bookmarks" }) { Icon(Icons.Outlined.BookmarkBorder, "查看书签") }
                     }
                 }
             }
@@ -201,7 +211,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                 Surface(
                     Modifier.fillMaxWidth().then(if (settings.immersiveMode) Modifier.navigationBarsPadding() else Modifier).onSizeChanged { menuHeight = it.height },
                     shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
+                    color = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                     shadowElevation = 5.dp
@@ -210,36 +220,60 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         session.onlineTitle?.let { title ->
                             val chapters = title.manga.chapters.orEmpty().asReversed()
                             val current = chapters.indexOfFirst { it.key == session.chapter?.key }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                TextButton(onClick = { pauseAutomatic(); vm.open(title.book, title, chapters[current - 1]) }, enabled = current > 0) { Text("上一章") }
-                                TextButton(onClick = { sheet = "online-chapters" }) { Text("章节目录") }
-                                TextButton(onClick = { pauseAutomatic(); vm.open(title.book, title, chapters[current + 1]) }, enabled = current >= 0 && current < chapters.lastIndex) { Text("下一章") }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { pauseAutomatic(); vm.open(title.book, title, chapters[current - 1]) }, enabled = current > 0) {
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, null, Modifier.size(18.dp))
+                                    Text("上一章")
+                                }
+                                TextButton(onClick = { sheet = "online-chapters" }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                                    Text("章节目录", style = MaterialTheme.typography.labelLarge)
+                                }
+                                TextButton(onClick = { pauseAutomatic(); vm.open(title.book, title, chapters[current + 1]) }, enabled = current >= 0 && current < chapters.lastIndex) {
+                                    Text("下一章")
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(18.dp))
+                                }
                             }
                         }
                         session.novelTitle?.let { title ->
                             val chapters = title.novel.chapters
                             val current = chapters.indexOfFirst { it.url == session.novelChapter?.url }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                TextButton(onClick = { pauseAutomatic(); vm.open(title.book, novel = title, novelChapter = chapters[current - 1]) }, enabled = current > 0) { Text("上一章") }
-                                TextButton(onClick = { sheet = "novel-chapters" }) { Text("章节目录") }
-                                TextButton(onClick = { pauseAutomatic(); vm.open(title.book, novel = title, novelChapter = chapters[current + 1]) }, enabled = current >= 0 && current < chapters.lastIndex) { Text("下一章") }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { pauseAutomatic(); vm.open(title.book, novel = title, novelChapter = chapters[current - 1]) }, enabled = current > 0) {
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, null, Modifier.size(18.dp))
+                                    Text("上一章")
+                                }
+                                TextButton(onClick = { sheet = "novel-chapters" }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                                    Text("章节目录", style = MaterialTheme.typography.labelLarge)
+                                }
+                                TextButton(onClick = { pauseAutomatic(); vm.open(title.book, novel = title, novelChapter = chapters[current + 1]) }, enabled = current >= 0 && current < chapters.lastIndex) {
+                                    Text("下一章")
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(18.dp))
+                                }
                             }
                         }
                         if (session.text != null && session.novelTitle == null) {
                             val chapters = session.text.chapters
                             val current = chapters.indexOfLast { it.offset <= session.position.textOffset }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 TextButton(onClick = {
                                     val target = chapters[current - 1].offset
                                     if (target != session.position.textOffset) recordUndo()
                                     vm.seekText(target)
-                                }, enabled = current > 0) { Text("上一章") }
-                                TextButton(onClick = { sheet = "chapters" }, modifier = Modifier.weight(1f)) { Text(session.text.chapterAt(session.position.textOffset), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                }, enabled = current > 0) {
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, null, Modifier.size(18.dp))
+                                    Text("上一章")
+                                }
+                                TextButton(onClick = { sheet = "chapters" }, modifier = Modifier.weight(1f), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                                    Text(session.text.chapterAt(session.position.textOffset), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
+                                }
                                 TextButton(onClick = {
                                     val target = chapters[current + 1].offset
                                     if (target != session.position.textOffset) recordUndo()
                                     vm.seekText(target)
-                                }, enabled = current < chapters.lastIndex) { Text("下一章") }
+                                }, enabled = current < chapters.lastIndex) {
+                                    Text("下一章")
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(18.dp))
+                                }
                             }
                         }
                         ReaderProgress(session, undoLabel = undoTarget?.second, onUndo = performUndo) { value ->
@@ -253,7 +287,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                                 vm.seekComic(target)
                             }
                         }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+                        Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                             if (session.text != null) {
                                 ReaderAction(Icons.AutoMirrored.Outlined.FormatListBulleted, "目录", "章节目录") { sheet = if (session.novelTitle != null) "novel-chapters" else "chapters" }
@@ -285,18 +319,23 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
     sheet?.let { active ->
         ModalBottomSheet(
             onDismissRequest = { sheet = null },
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = menuColorScheme.surface,
+            contentColor = menuColorScheme.onSurface,
             scrimColor = if (active == "settings") Color.Black.copy(alpha = 0.14f) else BottomSheetDefaults.ScrimColor,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
+            MaterialTheme(colorScheme = menuColorScheme) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).navigationBarsPadding()) {
                 when (active) {
                     "novel-chapters" -> {
                         Text("章节目录", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(10.dp))
                         val title = session.novelTitle!!
-                        LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(title.novel.chapters, key = { it.url }) { chapter ->
+                        val chapters = title.novel.chapters
+                        val currentIndex = chapters.indexOfFirst { it.url == session.novelChapter?.url }.coerceAtLeast(0)
+                        val listState = rememberLazyListState(initialFirstVisibleItemIndex = (currentIndex - 2).coerceAtLeast(0))
+                        LazyColumn(state = listState, modifier = Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(chapters, key = { it.url }) { chapter ->
                                 ChapterSheetRow(
                                     label = chapter.name,
                                     current = chapter.url == session.novelChapter?.url,
@@ -311,8 +350,11 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         Text("章节目录", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(10.dp))
                         val title = session.onlineTitle!!
-                        LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(title.manga.chapters.orEmpty(), key = { it.key }) { chapter ->
+                        val chapters = title.manga.chapters.orEmpty()
+                        val currentIndex = chapters.indexOfFirst { it.key == session.chapter?.key }.coerceAtLeast(0)
+                        val listState = rememberLazyListState(initialFirstVisibleItemIndex = (currentIndex - 2).coerceAtLeast(0))
+                        LazyColumn(state = listState, modifier = Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(chapters, key = { it.key }) { chapter ->
                                 ChapterSheetRow(
                                     label = chapter.label,
                                     current = chapter.key == session.chapter?.key,
@@ -361,8 +403,9 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         Spacer(Modifier.height(10.dp))
                         val chapters = session.text?.chapters.orEmpty()
                         val currentIndex = chapters.indexOfLast { it.offset <= session.position.textOffset }
+                        val listState = rememberLazyListState(initialFirstVisibleItemIndex = (currentIndex - 2).coerceAtLeast(0))
                         if (chapters.isEmpty()) Text("未识别到章节标题，可以继续阅读全文。", Modifier.padding(vertical = 24.dp))
-                        else LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        else LazyColumn(state = listState, modifier = Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             itemsIndexed(chapters, key = { _, chapter -> chapter.offset }) { index, chapter ->
                                 ChapterSheetRow(
                                     label = chapter.title,
@@ -423,6 +466,7 @@ fun ReaderScreen(vm: MainViewModel, session: ReaderSession, settings: ReaderSett
                         })
                     }
                 }
+            }
             }
         }
     }
@@ -579,11 +623,17 @@ private fun ComicPlaceholder(error: String?, modifier: Modifier, retry: (() -> U
 
 @Composable
 private fun ReaderAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, description: String, action: () -> Unit) {
-    TextButton(onClick = action, modifier = Modifier.semantics { contentDescription = description }) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(icon, null)
-            Text(label, style = MaterialTheme.typography.labelSmall)
-        }
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = action)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .semantics { contentDescription = description },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -601,6 +651,9 @@ private fun ChapterSheetRow(label: String, current: Boolean, enabled: Boolean = 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (current) {
+                Box(Modifier.width(3.dp).height(16.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(50)))
+            }
             Text(
                 label,
                 Modifier.weight(1f),
@@ -613,7 +666,7 @@ private fun ChapterSheetRow(label: String, current: Boolean, enabled: Boolean = 
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            if (current) Icon(Icons.Outlined.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            if (current) Text("当前", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
     }
 }

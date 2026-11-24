@@ -28,17 +28,20 @@ import androidx.compose.ui.unit.sp
 import com.chen.myviewer.data.ReaderSettings
 import java.util.Locale
 
-private data class ReadingPalette(val id: String, val label: String, val paper: Color, val ink: Color)
-private val ReadingPalettes = listOf(
+internal data class ReadingPalette(val id: String, val label: String, val paper: Color, val ink: Color)
+internal val ReadingPalettes = listOf(
     ReadingPalette("PAPER", "纸色", Color(0xFFF3EAD9), Color(0xFF312C25)),
     ReadingPalette("WHITE", "浅色", Color(0xFFFAFAF7), Color(0xFF232825)),
     ReadingPalette("GREEN", "护眼", Color(0xFFDBE8D3), Color(0xFF253725)),
     ReadingPalette("NIGHT", "深色", Color(0xFF1D2120), Color(0xFFCDD1C9)),
 )
 
+internal fun readingPalette(id: String): ReadingPalette =
+    ReadingPalettes.firstOrNull { it.id == id } ?: ReadingPalettes.first()
+
 @Composable
 fun ReadingSettings(settings: ReaderSettings, update: (ReaderSettings) -> Unit, readingMode: String? = null, onMode: (String) -> Unit = {}, showPreview: Boolean = true) {
-    val palette = ReadingPalettes.firstOrNull { it.id == settings.background } ?: ReadingPalettes.first()
+    val palette = readingPalette(settings.background)
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (showPreview) Surface(
             shape = RoundedCornerShape(16.dp),

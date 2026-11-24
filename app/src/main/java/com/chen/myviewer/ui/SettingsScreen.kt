@@ -56,6 +56,9 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        item(key = "header-reading") {
+            SettingsSectionHeading("阅读")
+        }
         item(key = "layout") {
             PreferenceCard("书架布局", "每行 $columns 本", Icons.Outlined.GridView, "layout" in expanded, { onToggleSection("layout") }) {
                 for (row in listOf(1..3, 4..6)) {
@@ -81,6 +84,9 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
         item(key = "reading") {
             val background = when (settings.background) { "WHITE" -> "浅色"; "GREEN" -> "护眼"; "NIGHT" -> "深色"; else -> "纸色" }
             PreferenceCard("小说阅读", "${settings.fontSize.toInt()} 号 · $background · ${if (settings.animation == "CURL") "仿真翻书" else "平移翻页"}", Icons.Outlined.TextFields, "reading" in expanded, { onToggleSection("reading") }) { ReadingSettings(settings, vm::updateSettings) }
+        }
+        item(key = "header-storage") {
+            SettingsSectionHeading("书籍与存储")
         }
         item(key = "import") {
             PreferenceCard("导入偏好", if (settings.copyOnImport) "默认复制到应用" else "默认直接读取原文件", Icons.Outlined.FileDownload, "import" in expanded, { onToggleSection("import") }) {
@@ -151,6 +157,9 @@ internal fun SettingsScreen(vm: MainViewModel, settings: ReaderSettings, columns
                 }
             }
         }
+        item(key = "header-other") {
+            SettingsSectionHeading("其他")
+        }
         item(key = "about") {
             PreferenceCard("关于 MyViewer", "版本 ${BuildConfig.VERSION_NAME}", Icons.Outlined.Info, "about" in expanded, { onToggleSection("about") }) {
                 Text("TXT 小说 · ZIP 与在线漫画", style = MaterialTheme.typography.bodyMedium)
@@ -192,6 +201,16 @@ internal fun formatFileSize(bytes: Long): String {
 }
 
 @Composable
+private fun SettingsSectionHeading(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+    )
+}
+
+@Composable
 private fun PreferenceCard(title: String, subtitle: String, icon: ImageVector, expanded: Boolean, onToggle: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(180), label = "设置分组箭头")
     Surface(
@@ -199,7 +218,7 @@ private fun PreferenceCard(title: String, subtitle: String, icon: ImageVector, e
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLowest,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
-        shadowElevation = 0.5.dp
+        shadowElevation = 0.dp
     ) {
         Column {
             Row(
